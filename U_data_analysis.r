@@ -87,16 +87,98 @@ model.appendix<-all_models %>% as_tibble() %>%
   left_join(model_parameters, by='model.n') %>%
   dplyr::select(-X)
 
+model.appendix 
+write.csv(model.appendix, 'Umbrella/model.appendix.lowAICc.csv')
+conversion.factor <- convert_units(distance_units = "Metre", 
+                                   effort_units=NULL, 
+                                   area_units = "square kilometre")
+for(h in 1:nrow(model.appendix)){
+  if(exists(model.appendix$model.name[h])){
+    print(paste(model.appendix$model.name[h], 'exists'))
+  }else{
+    assign(model.appendix$model.name[h], 
+           ds(get(paste0(model.appendix$species[h], '_dat')),
+              transect="point", key="hr",
+              formula=as.formula(model.appendix$formula[h]), 
+              adjustment = NULL, order = 0,
+              truncation = '5%', 
+              convert.units = conversion.factor))
+    print(paste(model.appendix$model.name[h], 'created'))
+  }
+}
+
+GOF_mod.app.miss<-NULL
+for(h in miss_sp_sub$model.name){
+  m<-get(h)
+  mod.gof<-gof_ds(m)
+  #building species summary information
+  gofinf<-data.frame(model.name=h,
+                     gof_cvm_w=mod.gof$dsgof$CvM$W,
+                     gof_cvm_p=mod.gof$dsgof$CvM$p)
+  GOF_mod.app.miss<-bind_rows(GOF_mod.app.miss,gofinf)
+}
+
+run_two<-miss_sp_sub %>% left_join(GOF_mod.app.miss) %>%
+  group_by(species) %>%
+  filter(gof_cvm_p > 0.05)
+
+mod.app.fin<-model.appendix %>% left_join(GOF_mod.app)
+write.csv(mod.app.fin, 'Umbrella/model_appendix_wGOF.csv')
+
+done_spp<-mod.app.fin %>% filter(gof_cvm_p > 0.05) %>%
+  bind_rows(miss_sp_sub %>% left_join(GOF_mod.app.miss) %>%
+              group_by(species) %>%
+              filter(gof_cvm_p > 0.05)) %>%
+  group_by(species) %>% 
+  arrange(desc(gof_cvm_p)) %>%
+  slice(1) %>% pull(species)
+
+miss_spp<-unique(model.appendix$species)[which(!(unique(model.appendix$species) %in% done_spp))]
+
+test<-all_models %>% as_tibble() %>%
+  group_by(species) %>%
+  left_join(parmfor.aicc, by='species') %>%
+  mutate(AICc= AIC + ((2*df*(df + 1))/(nobss - df - 1))) %>%
+  filter(AIC >200,
+         species %in% miss_spp) %>%
+  mutate(deltaAICc=AICc-min(AICc))
+
+ggplot()+geom_density(data=test, aes(x=deltaAICc))+
+  scale_x_continuous(lim=c(0, 10))
+
+miss_sp_sub<-all_models %>% as_tibble() %>%
+  group_by(species) %>%
+  left_join(parmfor.aicc, by='species') %>%
+  mutate(AICc= AIC + ((2*df*(df + 1))/(nobss - df - 1))) %>%
+  filter(AIC >200,
+         species %in% miss_spp) %>%
+  mutate(deltaAICc=AICc-min(AICc)) %>%
+  filter(deltaAICc < 7) %>%
+  arrange(desc(deltaAICc)) %>%
+  left_join(model_parameters, by='model.n')
+
+for(h in 1:nrow(miss_sp_sub)){
+  if(exists(miss_sp_sub$model.name[h])){
+    print(paste(miss_sp_sub$model.name[h], 'exists'))
+  }else{
+    assign(miss_sp_sub$model.name[h], 
+           ds(get(paste0(miss_sp_sub$species[h], '_dat')),
+              transect="point", key="hr",
+              formula=as.formula(miss_sp_sub$formula[h]), 
+              adjustment = NULL, order = 0,
+              truncation = '5%', 
+              convert.units = conversion.factor))
+    print(paste(miss_sp_sub$model.name[h], 'created'))
+  }
+}
+
+
 # Identify the top model, run it and pull out density & detection info
 top.models.spp<-model.appendix %>%
   filter(deltaAICc == 0)
 top.models.spp
 
 # create the models if they haven't been created yet
-conversion.factor <- convert_units(distance_units = "Metre", 
-                                   effort_units=NULL, 
-                                   area_units = "square kilometre")
-
 for(h in 1:nrow(top.models.spp)){
   if(exists(top.models.spp$model.name[h])){
     print(paste(top.models.spp$model.name[h], 'exists'))
@@ -134,15 +216,18 @@ for(p in unique(top.models.spp$species)){
     tm_sums<-data.frame(species=p, model.state='broken')
     row.names(tm_sums)<-p
   }else{
-    mod.sum<-summary(m)  
+    mod.sum<-summary(m)
+    mod.gof<-gof_ds(m)
     #building species summary information
     tm_sums<-data.frame(species=p,
                         model.state='fine',
-               phiMEAN=mod.sum$ds$average.p,
-               phiSE=mod.sum$ds$average.p.se,
-               truncation.distance=mod.sum$ds$width,
-               t(mod.sum$dht$individuals$D[,2]),
-               t(mod.sum$dht$individuals$D[,3])) %>% 
+                        gof_cvm_w=mod.gof$dsgof$CvM$W,
+                        gof_cvm_p=mod.gof$dsgof$CvM$p,
+                        phiMEAN=mod.sum$ds$average.p,
+                        phiSE=mod.sum$ds$average.p.se,
+                        truncation.distance=mod.sum$ds$width,
+                        t(mod.sum$dht$individuals$D[,2]),
+                        t(mod.sum$dht$individuals$D[,3])) %>% 
       rename(all_of(label.row.names))
     row.names(tm_sums)<-p
     
