@@ -1,8 +1,8 @@
 # Run the distance sampling models ####
-library(remotes)
-install_github("DistanceDevelopment/mrds")
-library(devtools)
-install_github("DistanceDevelopment/Distance")
+#library(remotes)
+#install_github("DistanceDevelopment/mrds")
+#library(devtools)
+#install_github("DistanceDevelopment/Distance")
 library(tidyverse); library(readxl); library(Distance); library(lubridate)
 
 #building all the data sets
@@ -30,6 +30,10 @@ all_birds<-DCERP_filt %>%
          Study.Area="MCBCL") %>%
   filter(USFS_hab_index !=0) %>%
   as.data.frame()
+
+conversion.factor <- Distance::convert_units(distance_units = "Metre", 
+                                             effort_units=NULL, 
+                                             area_units = "square kilometre")
 all_b_hr<-ds(all_birds,
    transect="point", key="hr", order = 0,
    truncation = '5%', convert.units = conversion.factor, er.var='P3')
@@ -39,15 +43,17 @@ all_b_hn<-ds(all_birds,
 summarize_ds_models(all_b_hr, all_b_hn, output = 'plain')
 
 # building all possible models
-variables<-c('Temp', 'Clouds', 'Wind', 'Noise', 'nMinAfterMid', 'OBS', 'Replicate', 'Year')
+variables<-c('Temp', 'Clouds', 'Wind', 'Noise', 'nMinAfterMid', 'OBS', 'Replicate', 'Year',
+             'HabCat')
 # temperature, cloud cover, wind, noise, start time, observer, replicate
-var.combos<-data.frame(data.frame(rbind(combn(variables, 2),NA, NA, NA, NA, NA, NA),
-                                  rbind(combn(variables, 3),NA, NA, NA, NA, NA),
-                                  rbind(combn(variables, 4),NA, NA, NA, NA),
-                                  rbind(combn(variables, 5),NA, NA, NA),
-                                  rbind(combn(variables, 6),NA, NA),
-                                  rbind(combn(variables, 7),NA),
-                                  rbind(combn(variables, 8))) %>%
+var.combos<-data.frame(data.frame(rbind(combn(variables, 2),NA, NA, NA, NA, NA, NA, NA),
+                                  rbind(combn(variables, 3),NA, NA, NA, NA, NA, NA),
+                                  rbind(combn(variables, 4),NA, NA, NA, NA, NA),
+                                  rbind(combn(variables, 5),NA, NA, NA, NA),
+                                  rbind(combn(variables, 6),NA, NA, NA),
+                                  rbind(combn(variables, 7),NA, NA),
+                                  rbind(combn(variables, 8),NA),
+                                  rbind(combn(variables, 9))) %>%
              t())
 models_pre<-unite(var.combos, 'formula', sep='+', na.rm=T) %>%
   mutate(formula=paste0('~', formula)) %>%
@@ -57,11 +63,18 @@ models_pre<-unite(var.combos, 'formula', sep='+', na.rm=T) %>%
                                        fixed=T))
 head(models_pre) #all the models possible
 write.csv(models_pre, '/home/tracidubose/BIRDS_RCW/all_possible_models.csv')
+models_already_completed<-read.csv('/home/tracidubose/BIRDS_RCW/all_possible_models_0929.csv')
+models_pre1<-models_pre  %>%
+  filter(!(formula %in% models_already_completed$formula))
+nrow(models_pre1); nrow(models_pre)
+models_pre_all<-models_pre
+models_pre<-models_pre1
+nrow(models_pre); nrow(models_pre_all)
 
 # removing models that commonly break ####
 library(corrplot)
 var.correl<-cor(DCERP %>%
-                  dplyr::select(all_of(variables), -OBS)%>%
+                  dplyr::select(all_of(variables), -OBS, -HabCat, HabCat_nf)%>%
                   filter(!is.na(Temp)) %>%
                   data.frame())
 corrplot.mixed(var.correl)
@@ -70,13 +83,14 @@ corrplot.mixed(var.correl)
 conversion.factor <- Distance::convert_units(distance_units = "Metre", 
                                    effort_units=NULL, 
                                    area_units = "square kilometre")
-done.spp<-substr(list.files('/home/tracidubose/BIRDS_RCW/DistanceModels/'),1,4)
+done.spp<-substr(list.files('/home/tracidubose/BIRDS_RCW/DistanceModels/',
+                            pattern='hab_cat'),9,12)
 sp.to.still.run<-species[!(species %in% done.spp)]
 #sp.to.still.run<-sp.to.still.run[sp.to.still.run!="COYE"] 
 #model ~103 broke for COYE, run without that after checking
-#will likely break on EABL as well
+#model 108 broke for CARW, run without
 
-for(u in sp.to.still.run){
+for(u in sp.to.still.run[-1]){
   model.summaries<-NULL
   for(w in 1:length(models_pre$model.n)){
     assign(paste(u, models_pre$model.n[w], sep='.'), 
@@ -117,7 +131,7 @@ for(u in sp.to.still.run){
     model.summaries<-bind_rows(model.summaries, mod_out)
   }
   write.csv(model.summaries, 
-            file=paste0('/home/tracidubose/BIRDS_RCW/DistanceModels/', 
+            file=paste0('/home/tracidubose/BIRDS_RCW/DistanceModels/hab_cat_', 
                         u,'_', format(Sys.Date(), '%m%d'),'_models.csv'), 
             row.names=F)
 }

@@ -1,7 +1,7 @@
 ### Loading Distance Sampling data ###
 library(tidyverse); library(readxl); library(Distance); library(lubridate)
 
-files<-list.files("G:/Shared drives/RCW Conservation Postdoc/Umbrella species paper/Data",
+files<-list.files('/home/tracidubose/BIRDS_RCW/', pattern='.xls',
                   full.names = T)
 files #what files do we have in the Data folder
 
@@ -31,6 +31,9 @@ DCERP<-bind_rows(read_excel(files[1]), #2009 data
          hoursmins=hm(Start.time),        # format to 'hours:minutes:seconds'
          nMinAfterMid=hour(hoursmins)*60 + minute(hoursmins), 
          Area=1,
+         HabCat_nf=hab_bins$mid[findInterval(USFS_hab_index, hab_bins$min,
+                                          left.open = F)],
+         HabCat=factor(HabCat_nf),
          Year=year(Date1)) #estimating area size in km2
 names(DCERP)
 #don't know what label stands for. 
@@ -78,7 +81,7 @@ gdf<-data.frame(counts=hist_gdf$counts,
 ggplot()+geom_col(data=gdf, aes(x=radius, y=scaled_counts))+
   scale_y_continuous(name="frequency/area")+
   scale_x_continuous(name="radial distance")
-
+rm(gdf, hist_gdf)
 
 #creating an empty 'sample layer' dataframe to account for search area
 point_sample_empty <- DCERP_filt %>% 
@@ -93,23 +96,23 @@ point_sample_empty <- DCERP_filt %>%
          `6-8`=0,
          `Cluster size`=NA,
          distance=NA) %>%
-  ungroup()
+  ungroup() %>% dplyr::select(-hoursmins)
 
 # creating a function to filter the data & supplement rows for samples with no observations
 spfilter<-function(sp_abbr){
   
   #filter the data to just include the species of interest
-  sp_data <- DCERP_filt %>% filter(Species==sp_abbr)
+  sp_data <- DCERP_filt %>% filter(Species==sp_abbr) %>% dplyr::select(-hoursmins)
   
   #identify samples that do include the species of interest
   sampled_pts <- sp_data %>%
-    group_by(`Pt name`, Replicate) %>%
+    dplyr::group_by(`Pt name`, Replicate) %>%
     slice(1)
   
   #pull from point_sample_empty samples that are not found within sampled_pts
-  needed_rows<-union(sampled_pts,
-                     point_sample_empty)%>%
-    group_by(`Pt name`, Replicate) %>%
+  needed_rows<-bind_rows(sampled_pts,
+                     point_sample_empty) %>%
+    dplyr::group_by(`Pt name`, Replicate) %>%
     arrange(`Pt name`, Replicate)%>%
     slice(1) %>%
     filter(is.na(distance))
@@ -117,8 +120,7 @@ spfilter<-function(sp_abbr){
   #bind rows to capture all species observations and empty rows for sampled areas
   #minimum number of rows is 596
   output<-rbind(sp_data, needed_rows) %>%
-    mutate(Region.Label=hab_bins$mid[findInterval(USFS_hab_index, hab_bins$min,
-                                                  left.open = F)],
+    mutate(Region.Label='1x',
            Sample.Label=paste(`Pt name`, Replicate, sep="."), #this identifies unique samples within strata
            size=`Cluster size`,
            Effort=1,
@@ -128,4 +130,29 @@ spfilter<-function(sp_abbr){
   print("Empty Samples + Not Empty Samples = 596")
   print(paste("for", sp_abbr, nrow(needed_rows),"+", nrow(sampled_pts),"=", nrow(needed_rows)+nrow(sampled_pts)))
   return(output)
+}
+
+
+#function to run models quickly
+build_ds_models<-function(species, model.name, formula, region='all'){
+  if(exists(model.name) & region=='all'){
+      print(paste(model.name, 'exists'))
+      return(get(model.name))
+    }else{
+      if(region=='all'){
+        sp_dat_region<-get(paste0(species, '_dat'))
+        }else{
+          sp_dat_region<-get(paste0(species, '_dat')) %>%
+            filter(Region.Label==region) 
+      }
+      mn <- ds(sp_dat_region,
+                transect="point", key="hr",
+                formula=as.formula(formula), 
+                adjustment = NULL, order = 0,
+                truncation = '5%', 
+                convert.units = conversion.factor)
+      print(paste(model.name, '_', region, 'created'))
+      
+    }
+  return(mn)
 }
