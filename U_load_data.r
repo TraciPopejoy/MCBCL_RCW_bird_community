@@ -1,7 +1,8 @@
 ### Loading Distance Sampling data ###
 library(tidyverse); library(readxl); library(Distance); library(lubridate)
 
-files<-list.files('/home/tracidubose/BIRDS_RCW/', pattern='.xls',
+files<-list.files('G://Shared drives/RCW Conservation Postdoc/Umbrella species paper/Data/',
+                  pattern='.xls',
                   full.names = T)
 files #what files do we have in the Data folder
 
@@ -39,12 +40,21 @@ names(DCERP)
 #don't know what label stands for. 
 #`Pt name`:notes & Replicate would be the sample data layer, 
 #`Start time`:`Cluster size` would be the observation data layer
+#write.csv(
 DCERP %>%
   group_by(`Pt name`) %>%
-  count(USFS_hab_index)
+  count(USFS_hab_index) %>%
+  left_join(plot_types, by=c(`Pt name`='Plot')) %>% 
+  left_join(DCERP %>% select(`Pt name`, Year, USFS_hab_index) %>% 
+              group_by(`Pt name`, USFS_hab_index) %>% slice(1))#,
+#          'Umbrella/raw sample size.csv')
 
 #Avian detections beyond 300m and from flyovers were omitted 
 #subsequently species that represented less than 0.1% of all bird observations were removed.  
+DCERP %>% 
+  group_by(Species) %>% 
+  tally() %>% arrange(n) 
+
 rare_birds <- DCERP %>% 
   group_by(Species) %>% 
   tally() %>%
@@ -106,13 +116,13 @@ spfilter<-function(sp_abbr){
   
   #identify samples that do include the species of interest
   sampled_pts <- sp_data %>%
-    dplyr::group_by(`Pt name`, Replicate) %>%
+    dplyr::group_by(`Pt name`, Replicate, Year) %>%
     slice(1)
   
   #pull from point_sample_empty samples that are not found within sampled_pts
   needed_rows<-bind_rows(sampled_pts,
                      point_sample_empty) %>%
-    dplyr::group_by(`Pt name`, Replicate) %>%
+    dplyr::group_by(`Pt name`, Replicate, Year) %>%
     arrange(`Pt name`, Replicate)%>%
     slice(1) %>%
     filter(is.na(distance))
@@ -121,13 +131,13 @@ spfilter<-function(sp_abbr){
   #minimum number of rows is 596
   output<-rbind(sp_data, needed_rows) %>%
     mutate(Region.Label='1x',
-           Sample.Label=paste(`Pt name`, Replicate, sep="."), #this identifies unique samples within strata
+           Sample.Label=paste(`Pt name`, Replicate, Year, sep="."), #this identifies unique samples within strata
            size=`Cluster size`,
            Effort=1,
            Study.Area="MCBCL") %>%
     filter(USFS_hab_index !=0) %>%
     as.data.frame()
-  print("Empty Samples + Not Empty Samples = 596")
+  print("Empty Samples + Not Empty Samples = 1178")
   print(paste("for", sp_abbr, nrow(needed_rows),"+", nrow(sampled_pts),"=", nrow(needed_rows)+nrow(sampled_pts)))
   return(output)
 }
@@ -156,3 +166,30 @@ build_ds_models<-function(species, model.name, formula, region='all'){
     }
   return(mn)
 }
+
+# Habitat Associate groups from Allen et al. 2006 (the Auk) -----
+#bird codes from: https://www.birdpop.org/pages/birdSpeciesCodes.php 
+bird.codes<-read.csv('Umbrella/results/Cornell_list19p.csv')
+longleaf<-c('Pine Warbler', 'Brown-headed Nuthatch','Red-cockaded Woodpecker',
+            'Prairie Warbler',"Bachman's Sparrow", 'Chipping Sparrow',
+            'Eastern Wood-Pewee', 'Red-headed Woodpecker', 'Eastern Bluebird')
+firesup<-c('Red-eyed Vireo', 'Acadian Flycatcher', 'Ovenbird', 
+           'Black-and-white Warbler', 'Tufted Titmouse', 'Wood Thrush', 'Yellow-throated Vireo',
+           'Yellow-throated Warbler', 'Blue-gray Gnatcatcher')
+pocosin<-c('Eastern Towhee', 'Common Yellowthroat', 'Carolina Wren', 'Northern Cardinal', 
+           'White-eyed Vireo','Hooded Warbler')
+generalist<-c('Carolina Chickadee', 'Summer Tanager', 'Great Crested Flycatcher', 'Blue Jay',
+              'Red-bellied Woodpecker', 'Northern Flicker', 'Brown-headed Cowbird', 'Indigo Bunting',
+              'Mourning Dove', 'Northern Bobwhite', 'American Crow')
+bird.assem<-data.frame(COMMONNAME=c(longleaf, firesup, pocosin, generalist),
+                       `Habitat group`=c(rep('longleaf', length(longleaf)),
+                                         rep('hardwood', length(firesup)),
+                                         rep('shrub', length(pocosin)),
+                                         rep('generalist', length(generalist)))) %>%  
+  left_join(bird.codes) %>%
+  filter(SPEC %in% DCERP_filt$Species) %>%
+  dplyr::select(-SP, -CONF, -SPEC6, -CONF6) %>%
+  rename(`Common name`='COMMONNAME', `Scientific name`='SCINAME',
+         `Species code`='SPEC') %>%
+  dplyr::select(`Scientific name`, `Common name`, `Species code`, Habitat.group)
+
