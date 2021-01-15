@@ -134,6 +134,7 @@ usfs_grad <- data.frame(USFS_s=seq(-2.6, 1.6, length=50)) %>%
   mutate(USFS_r=USFS_s*0.6950697+3.907453)
 
 #Figure 3 - RCWO occupancy and presence
+library(unmarked)
 abundance_summary <- read.csv('Umbrella/results/abundance summary 95 confidence.csv')
 rcwo_top_occ<-readRDS('Umbrella/OccupancyModel/RCWO_occmod.rds')
 rcw.psi <- predict(rcwo_top_occ$`242`, type="psi", 

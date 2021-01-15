@@ -79,10 +79,11 @@ sampled_area_km<-read.csv('Umbrella/results/models_20201016.csv') %>%
 #bootstraps
 (nbootstraps <- all_mod_run %>% filter(phi !=10) %>% count(species) %>% arrange(n))
 
+
 #models I will use
 set.seed(122015) #repeatability
 booted_mod<-all_mod_run %>% 
-  filter(phi < 1.1) %>% 
+  filter(phi < 1.1) %>%
   mutate(sp.run.bat=paste(species, runN, batch, type)) %>%
   group_by(species) %>%
   slice_sample(n=500)
@@ -271,7 +272,8 @@ DCERP_filt %>%
 abundance_summary %>%
   group_by(species) %>%
   select(species, HabCatfix, x50) %>%
-  left_join(npts_hab, by=c('HabCatfix'='HabCat')) %>%
+  left_join(npts_hab %>% mutate(HabCatfix=as.numeric(paste(HabCat))) %>%
+            select(-HabCat))%>%
   mutate(w.mean=weighted.mean(x50, n)) %>%
   filter(HabCatfix %in% c(2.5, 4.76)) %>%
   select(-n) %>%
@@ -281,7 +283,7 @@ abundance_summary %>%
   left_join(reg_sig) %>%
   left_join(t4_occ, by=c('species'='spp')) %>%
   select(Habitat.group, `Common name`, `Occupancy Estimate`, phi, Hab.coeff, qt0, w.mean, l_to_h) %>%
-  arrange(Habitat.group) %>%
+  arrange(Habitat.group) %>% View()
   write.csv('Umbrella/results/Table4_20201116.csv')
 
 # Old plots not used anymore ------

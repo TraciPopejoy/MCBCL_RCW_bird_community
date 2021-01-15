@@ -33,9 +33,15 @@ dev.off()
 # info on RCW and Bachmann's Sparrow
 abun_gdf %>%
   left_join(reg_sig) %>%
-  filter(species %in% c('RCWO', 'BACS'))%>%
-  select(`Mean abundance birds/km`, Hab.coeff, phi, qt0)
-booted_reg %>% filter(species %in% c('RCWO', 'BACS'))
+  filter(species %in% c('RCWO', 'BACS')) %>%
+  select(Mean.abundance.birds.km, Hab.coeff, phi, qt0)
+booted_reg %>% filter(species %in% c('RCWO', 'BACS')) %>%
+  select(value_type, starts_with('Hab'), phi)
+
+abun_gdf %>%
+  filter(Habitat.group=='longleaf',
+         (species %in% c('BHNU','CHSP','PIWA')),
+         HabCatfix==2.5)
 
 abun_gdf %>%
   filter(Habitat.group=='longleaf',
@@ -44,16 +50,28 @@ abun_gdf %>%
   ungroup()%>%
   summarize(median(x50))
 
+booted_reg %>% filter(species=='PRAW'|species=='CHSP') %>%
+  select(value_type, starts_with('Hab'), phi)
+
 abun_gdf %>%
   filter(Habitat.group=='shrub',
          HabCatfix %in% c(2.5, 4.76)) %>%
   select(species, HabCatfix, x50, `Common name`, phi) %>%
   View()
   
+abun_gdf %>% filter(Habitat.group=='hardwood') 
 abun_gdf %>% filter(Habitat.group=='hardwood') %>%
-  select(phi)
+  group_by(species) %>%
+  summarize(weighted.mean(x50, c(32, 34, 51, 55, 46)))
+                       
+View(booted_reg)
+abun_gdf %>% filter(Habitat.group=='shrub') %>%
+  select(species, HabCatfix, Mean.abundance.birds.km)
+abun_gdf %>% filter(Habitat.group=='shrub') %>%
+  group_by(species) %>%
+  summarize(weighted.mean(x50, c(32, 34, 51, 55, 46)))
 
-abun_gdf %>% filter(Habitat.group=='shrub') 
+
 
 # fuzzy ordination to assess alignment with RCW habitat index ----
 library(fso); library(vegan); library(cowplot)
@@ -105,10 +123,13 @@ ord_gdf<- ordination_df %>%
   bind_cols(mu=fuzzy_ord$mu[,1]) %>%
   dplyr::select(PtName, mu, everything())
 
+ord_gdf %>% ungroup() %>%
+  summarize(max(mu), min(mu))
+
 # Figure 7 fit of fuzzy ordination plot ----
 ggplot()+
   geom_point(data=ord_gdf, aes(x=USFS_hab_index, y=mu), alpha=0.6)+
-  geom_text(aes(x=2.5, y=0.545, label="r = 0.491\np < 0.001"))+
+  geom_text(aes(x=2.5, y=0.545, label="r = 0.489\np < 0.001"))+
   #ggtitle('Fit of USFS Habitat Index ordination')+
   scale_y_continuous('mu')+
   scale_x_continuous('RCW habitat score')+
@@ -215,7 +236,7 @@ phi.table<-abundance_good %>%
 phi.table %>% 
   left_join(bird.assem, by=c('species'='Species code')) %>%
   arrange(Habitat.group) %>%
-  select(-`Scientific name`, -species) %>%
+  select(-`Scientific name`, -species) %>% View()
   write.csv('Umbrella/results/TableS4_dist_detect_habcat.csv')
 
 model.appendix.all<-read.csv('Umbrella/model.appendix.20201116.csv') # from U_
@@ -252,7 +273,7 @@ ord_gdf_long %>%
   facet_wrap(~Habitat.group)+
   scale_y_continuous(name='Relative Abundance',
                      labels=scales::percent)+
-  scale_color_viridis_d('RCW habitat score')+
+  scale_color_viridis_d('RCW habitat score', option='plasma')+
   theme_cowplot()+
   theme(legend.position='bottom')
 
