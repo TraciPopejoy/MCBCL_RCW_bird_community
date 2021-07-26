@@ -224,7 +224,10 @@ abundance_good<-read.csv('Umbrella/results/abundance_used_quant.csv')
 # want a table of species x habitat category detection
 names(abundance_good)
 unique(abundance_good$HabCat)
+abundance_good %>% filter(phi < 0.1)
+
 phi.table<-abundance_good %>% 
+  filter(!is.na(Species)) %>% 
   mutate(HabCatfix=case_when(substr(HabCat,4,4)==5~sub('5','6',HabCat),
                               T~as.character(HabCat))) %>%
   group_by(species, HabCatfix) %>%
@@ -232,11 +235,14 @@ phi.table<-abundance_good %>%
   pivot_wider(names_from=HabCatfix, values_from=m.phi) %>%
   mutate(w.m.phi=weighted.mean(c(`2.5`,`3.26`,`3.76`,`4.26`,`4.76`),
                                c(32,34,51,55,46)))
+DCERP_filt %>% mutate(Sample.Label=paste(`Pt name`, Replicate, Year, sep='.'))%>%
+  filter(Sample.Label=='CR1.4.2009' & Species=='AMCR')
 
 phi.table %>% 
   left_join(bird.assem, by=c('species'='Species code')) %>%
   arrange(Habitat.group) %>%
-  select(-`Scientific name`, -species) %>% View()
+  select(-`Scientific name`, -species) 
+%>% 
   write.csv('Umbrella/results/TableS4_dist_detect_habcat.csv')
 
 model.appendix.all<-read.csv('Umbrella/model.appendix.20201116.csv') # from U_

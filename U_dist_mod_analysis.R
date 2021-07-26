@@ -81,7 +81,7 @@ model.appendix.all<-bind_rows(model.appendix, best_bad_models) %>%
 
 write.csv(model.appendix.all, 'Umbrella/model.appendix.20201116.csv')
 
-
+model.appendix.all<-read.csv('Umbrella/model.appendix.20201116.csv')
 # Figure S1 parameter barchart ----
 mod_parm<-model.appendix.all %>% filter(model.rank==1) %>%
   dplyr::select(species, formula) %>%
@@ -123,18 +123,21 @@ dist.det.p<-ggplot()+
   theme(axis.title.y=element_blank())
 
 #read in and create occupancy model parameter graph
-top_occ_mod <- read.csv('Umbrella/OccupancyModel/top_occupancy_models.csv')
-occ.det.p<-top_occ_mod %>% filter(delta==0) %>%
+top_occ_mod <- read.csv('Umbrella/SimpleOcc/top_occupancy_models.csv')
+occ.det.p<-new_mod_info %>% 
+  filter(parameter=='psi.USFS_s') %>%
   select(spp, p.cloud.:df, AICc) %>% 
   mutate(across(starts_with('p.'), .fns=as.character)) %>%   
   as_tibble()%>%
   pivot_longer(cols=c(p.cloud.:p.wind.)) %>%
   filter(!is.na(value)) %>% 
+  bind_rows(data.frame(spp=c("AMCR","NOFL","EATO"),
+                       name=as.character(1))) %>%
   mutate(parm.name=recode(name, p.wind.='Wind', p.USFS_s.='RCW score',
                           p.temp.='Temp', p.rep.='Replicate', p.obs.='OBS',
                           p.noise.='Noise', p.minAmid.='nMin', p.cloud.='Clouds'),
-         parmF=factor(parm.name, levels=c('Clouds', 'nMin','Noise', 'Wind','Temp', 
-                                          'Replicate', 'OBS', 'RCW score'))) %>%
+         parmF=factor(parm.name, levels=c('1','Clouds', 'nMin', 'Wind','Noise','OBS','Temp', 
+                                          'Replicate'))) %>%
   ggplot()+
   geom_histogram(aes(x=parmF), stat='count')+
   coord_flip()+

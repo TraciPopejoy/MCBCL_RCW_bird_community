@@ -172,40 +172,119 @@ abundance_summary %>%
   arrange(desc(tmean))
 
 # Figure 6 -----
-# csv from U_occupancy_models.R
-occ_gdf<-read.csv('Umbrella/OccupancyModel/occupancy_hab_coef.csv')
-top_occ_mod<-read.csv('Umbrella/OccupancyModel/top_occupancy_models.csv')
+# Occupancy side of the graph
+# csv from U_simple_occ.R
+top_occ_mod <- read.csv('./Umbrella/SimpleOcc/top_occupancy_models.csv')
+occ_coef_trans <- read.csv('Umbrella/SimpleOcc/occu_model_parameter_transformations.csv')
+top_rcw_mod_sum<-top_occ_mod %>%
+  filter(!is.na(psi.USFS_s.)) %>%
+  select(rowname, spp, year, psi.USFS_s., AICc, delta) %>%
+  group_by(spp, year) %>%
+  mutate(deltaRCW=AICc-min(AICc))
+new_mod_info<-occ_coef_trans %>% 
+  left_join(top_occ_mod, by=c('spp', 'year', 'mod_name'='rowname'))
+
+new_mod_info %>% filter(parameter=='psi.USFS_s') %>%
+  select(-starts_with('p.'),-starts_with('OR.'), -weight, -delta, -AICc, 
+         -logLik, -df, -psi.Int., -psi.USFS_s.) %>%
+  mutate(signif=case_when(logit.025 > 0 & logit.975 > 0 ~ 'positive',
+                          logit.025 < 0 & logit.975 > 0 ~ 'no effect',
+                          logit.025 < 0 & logit.975 < 9 ~ 'negative')) %>%
+  left_join(bird.assem, by=c('spp'='Species code')) %>%
+  filter(Habitat.group=='generalist' & signif=='positive') %>% count(spp)
+
+occ_gdf<-read.csv('Umbrella/SimpleOcc/occupancy_hab_coef_est.csv')
+top_occ_mod<-read.csv('Umbrella/SimpleOcc/top_occupancy_models.csv')
 occ_table<-occ_gdf %>% filter(rowname=='USFS_s') %>%
-  left_join(top_occ_mod %>% select(spp, rowname, delta), 
-            by=c('species'='spp', 'model_n'='rowname')) %>%
+  left_join(top_occ_mod %>% select(spp, year, rowname, delta), 
+            by=c('spp','year', 'model_n'='rowname')) %>%
   mutate(topM=ifelse(delta==0, '*',''))
 
+oc<-new_mod_info %>%
+  filter(parameter=='psi.USFS_s') %>%
+  select(spp, year, starts_with("OR.")) %>%
+  left_join(bird.assem, by=c('spp'='Species code')) %>%
+  filter(spp!="TUTI" | year!="2009",
+         spp!="RCWO") %>%
+  mutate(HabF=factor(Habitat.group, 
+                     levels=c('longleaf', 'generalist','hardwood', 'shrub')),
+         year=as.factor(year)) %>%
+  ggplot()+
+  geom_rect(xmin=1.3, xmax=Inf, ymin=-Inf, ymax=Inf, 
+            fill='grey85', alpha=0.3)+
+  geom_vline(xintercept=1, linetype='dashed', color='black')+
+  geom_linerange(aes(y=`Common name`, group=year, xmin=OR.025, xmax=OR.975),
+                 position=position_dodge(width=0.4),
+                 alpha=0.7)+
+  geom_point(aes(y=`Common name`, x=OR.est, shape=year),
+             position=position_dodge(width=0.4), 
+             size=2, alpha=0.7)+
+  #geom_text(aes(y=`Common name`, x=min(sigx), label=allsig))+
+  facet_wrap(~HabF, scales='free_y', ncol=1, 
+             strip.position = 'left')+
+  scale_x_continuous('Odds Ratio', trans=scales::pseudo_log_trans(sigma=.3), 
+                     breaks = c(0,1,2,4,8))+
+  scale_y_discrete('')+
+  scale_shape_manual('',values=c(1,2))+
+  theme_cowplot()+
+  theme(legend.position = 'top',
+        strip.placement='outside',
+        strip.background = element_rect(fill=NA),
+        strip.text=element_text(size=10),
+        #panel.grid.major.y = element_line(color="black"),
+        legend.justification = 'left',
+        axis.text.y=element_text(size=8.5),
+        legend.box.just = 'left',
+        legend.text = element_text(size=8.5),
+        legend.title = element_blank(),
+        axis.text=element_text(size=8.5),
+        axis.title.y = element_blank(),
+        axis.title.x=element_text(size=9),
+        plot.title = element_text(size=10, hjust=0.5))+
+  ggtitle('Occupancy')
+ocp = ggplot_gtable(ggplot_build(oc))
+#gtable::gtable_show_layout(ohp)
+# get the number of unique x-axis values per facet (1 & 3, in this case)
+y.var <- sapply(ggplot_build(oc)$layout$panel_scales_y,
+                function(l) length(l$range$range))
+# change the relative widths of the facet columns based on
+# how many unique x-axis values are in each facet
+ocp$heights[ocp$layout$t[grepl("panel", ocp$layout$name)]] <- ocp$heights[ocp$layout$t[grepl("panel", ocp$layout$name)]] * y.var
+grid.draw(ocp)
+ggsave('Umbrella/results/Figures/Fig6b_coeffs_210325.jpg', grid.draw(ocp),
+       width=4, height=7)
+
+# Abundance side of the graph
 oh<-booted_mod %>%
   select(-X, -runN, -n_obs, -sp.run.bat) %>%
   group_by(species) %>% 
   summarize(Hab.Est_mean=median(Hab.Est),
             Hab.Est_SE=median(Hab.SE),
             Hab.Est_p=median(Hab.pvalue)) %>%
-  left_join(occ_table %>% select(species, Estimate, SE, topM), 
-            by='species') %>%
-  pivot_longer(cols=c(-species, -Hab.Est_p, -topM))%>% 
+  #left_join(occ_table %>% select(spp, year, Estimate, SE, topM)%>%
+  #            distinct(.keep_all=T), 
+  #          by=c('species'='spp')) %>%
+  pivot_longer(cols=c(-species, -Hab.Est_p)) %>% 
   mutate(type= case_when(grepl('Hab',name)~'Density',
                          T~'Occupancy'),
          shit=case_when(grepl('SE', name)~'se',
                         grepl('se', name)~'se',
-                        T~'mean'))%>%
+                        T~'mean')) %>%
+  #filter(!(type=="Density" & year==2010)) %>%
+  #group_by(species, year) %>% 
   pivot_wider(names_from = shit,
               values_from = value) %>%
-  group_by(species, type, topM) %>%
+  group_by(species, type) %>%
   summarize(mean=mean(mean, na.rm=T),
             se=mean(se, na.rm=T),
-            meanp=median(Hab.Est_p)) %>%
+            meanp=median(Hab.Est_p),
+            .groups='keep') %>%
   left_join(reg_sig %>% select(qt0, species)) %>%
-  mutate(sig=ifelse(qt0>= 0.975 | qt0<=0.025, '@', ''),
-         allsig=case_when(topM=='*' & sig=='@'~'B',
-                          topM=='*' & sig!='@'~'o',
-                          topM!='*' & sig=='@'~'D',
-                          T~'')) %>%
+  mutate(sig=ifelse(qt0>= 0.975 | qt0<=0.025, '@', '')) %>%
+  #       allsig=case_when(topM=='*' & sig=='@'~'B',
+  #                        topM=='*' & sig!='@'~'o',
+  #                        topM!='*' & sig=='@'~'D',
+  #                        T~'')) %>%
   left_join(bird.assem, by=c('species'='Species code')) %>%
   group_by(Habitat.group) %>%
   mutate(sigx=min(mean-se),
@@ -215,29 +294,30 @@ oh<-booted_mod %>%
   geom_rect(xmin=0,xmax=5.7, ymin=-Inf, ymax=Inf, 
             fill='grey85')+
   geom_vline(xintercept=0, linetype='dashed', color='black')+
-  geom_linerange(aes(y=`Common name`, color=type,
-                     xmin=mean-se, xmax=mean+se),
-                 position=position_dodge(width=0.4),
-                 alpha=0.5)+
-  geom_point(aes(y=`Common name`, x=mean, color=type), 
-             size=2, position=position_dodge(width=.4),
-             alpha=0.5)+
-  geom_text(aes(y=`Common name`, x=min(sigx), label=allsig))+
+  geom_linerange(aes(y=`Common name`, 
+                     xmin=mean-se, xmax=mean+se))+
+  geom_point(aes(y=`Common name`, x=mean), size=2)+
+  #geom_text(aes(y=`Common name`, x=min(sigx), label=allsig))+
   facet_wrap(~HabF, scales='free_y', ncol=1, 
              strip.position = 'left')+
-  scale_x_continuous('Coefficient', trans=scales::pseudo_log_trans(sigma=.2),
+  scale_x_continuous('Coefficient', 
                      expand=c(0.04,0),
-                     breaks = c(-1, 0,1,3,6))+
+                     breaks = c(-1, -0.5,0,1,3,6))+
   scale_y_discrete('')+
   scale_color_viridis_d('',end=.6)+
   theme_cowplot() +
   theme(strip.placement='outside',
-        strip.background = element_rect(fill=NA),
-        strip.text=element_text(size=10),
+        strip.background = element_blank(),
+        strip.text=element_blank(),
         #panel.grid.major.y = element_line(color="black"),
         legend.position = 'top',
         #legend.justification = 'center',
-        axis.text.y=element_text(size=8.5))
+        axis.text=element_text(size=8.5),
+        axis.title.y = element_blank(),
+        axis.title.x=element_text(size=9),
+        axis.text.y = element_blank(),
+        plot.title = element_text(size=10, hjust=0.5))+
+  ggtitle('Density')
 #tutorial https://stackoverflow.com/questions/52341385/how-to-automatically-adjust-the-width-of-each-facet-for-facet-wrap
 ohp = ggplot_gtable(ggplot_build(oh))
 #gtable::gtable_show_layout(ohp)
@@ -248,8 +328,8 @@ y.var <- sapply(ggplot_build(oh)$layout$panel_scales_y,
 # how many unique x-axis values are in each facet
 ohp$heights[ohp$layout$t[grepl("panel", ohp$layout$name)]] <- ohp$heights[ohp$layout$t[grepl("panel", ohp$layout$name)]] * y.var
 grid.draw(ohp)
-ggsave('Umbrella/results/Figures/Fig6_coeffs.jpg', grid.draw(ohp),
-       width=4.5, height=7)
+ggsave('Umbrella/results/Figures/Fig6a_coeffs_210325.jpg', grid.draw(ohp),
+       width=2, height=6.4)
 
 # Table 3 ----
 #number of points
@@ -268,7 +348,21 @@ DCERP_filt %>%
 
 
 # Table 4 ----
-# t4_occ created in U_occupancy_models.R
+# occ_coef_trans loaded above and created in U_simple_occ.R
+t4_occ<-occ_coef_trans %>% 
+  left_join(top_occ_mod, by=c('spp', 'year', 'mod_name'='rowname')) %>%
+  filter(parameter=='psi.USFS_s') %>% select(spp, year, starts_with('logit')) %>%
+  left_join(bird.assem, by=c('spp'='Species code')) %>% arrange(Habitat.group) %>%
+  select(-`Common name`, -`Scientific name`) %>%
+  mutate(est=round(logit.estimate,2),
+         star=case_when(logit.025 > 0 & logit.975 > 0 ~ '*',
+                        logit.025 < 0 & logit.975 < 0 ~ '*',
+                        T ~''),
+         OccEst=paste0(est,star)) %>%
+  select(spp, year, OccEst) %>%
+  pivot_wider(names_from=year,values_from=OccEst) %>%
+  mutate(`Occupancy Estimate`= paste(`2009`,`2010`, sep=', '))
+
 abundance_summary %>%
   group_by(species) %>%
   select(species, HabCatfix, x50) %>%
@@ -284,8 +378,29 @@ abundance_summary %>%
   left_join(t4_occ, by=c('species'='spp')) %>%
   select(Habitat.group, `Common name`, `Occupancy Estimate`, phi, Hab.coeff, qt0, w.mean, l_to_h) %>%
   arrange(Habitat.group) %>% View()
-  write.csv('Umbrella/results/Table4_20201116.csv')
+  write.csv('Umbrella/results/Table4_20210323.csv')
 
+# Figure S1 ---
+  
+  bp<-new_mod_info %>% filter(parameter=='psi.USFS_s') %>%
+    select(-starts_with('p.'),-starts_with('OR.'), -weight, -delta, -AICc, -logLik, -df, -psi.Int., -psi.USFS_s.) %>%
+    mutate(signif=case_when(logit.025 > 0 & logit.975 > 0 ~ 'positive',
+                            logit.025 < 0 & logit.975 > 0 ~ 'no effect',
+                            logit.025 < 0 & logit.975 < 9 ~ 'negative')) %>%
+    left_join(bird.assem, by=c('spp'='Species code')) %>%
+    mutate(HabF=factor(Habitat.group, levels=c('longleaf', 'generalist','hardwood', 'shrub'))) %>%
+    ggplot()+
+    geom_tile(aes(y=spp, x=as.factor(year), fill=signif))+
+    facet_wrap(~HabF, scales='free',ncol = 1,
+               strip.position = 'left')+
+    scale_fill_manual('RCW\neffect', values=c('red','grey','blue'))+
+    scale_x_discrete('Year')+
+    theme_bw()+
+  theme(strip.placement='outside',
+        strip.background = element_blank())
+
+#count(signif) 
+  
 # Old plots not used anymore ------
 #mean abundance across all habitat type
 g<-abundance_summary %>%
