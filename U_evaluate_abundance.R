@@ -1,4 +1,5 @@
 library(tidyverse); library(cowplot)
+source('Umbrella/U_load_data.r')
 abundance_summary <- read.csv('Umbrella/results/abundance summary 95 confidence.csv')
 
 # PDF of bird abundance trend & relationship with habitat ----
@@ -76,6 +77,11 @@ abun_gdf %>% filter(Habitat.group=='shrub') %>%
 # fuzzy ordination to assess alignment with RCW habitat index ----
 library(fso); library(vegan); library(cowplot)
 abundance_good<-read.csv('Umbrella/results/abundance_used_quant.csv')
+
+# identify the area sampled at each point, used to quantify density later?
+sampled_area_km<-read.csv('Umbrella/results/models_20201016.csv') %>%
+  group_by(species) %>%
+  summarize(samp.area=mean(trun.dist*trun.dist*pi/1e6)) 
 
 #build a site x community matrix based on bird densities
 ordination_df<-abundance_good %>% 
@@ -157,10 +163,15 @@ ord_gdf_long %>% summarize(tper=sum(rel.abundance)) %>%
   arrange(tper) %>% ungroup() %>% slice(1:5, 213:218)
 
 #plot with relative abundance
-ggplot(ord_gdf_long)+
+bird_cols<-hcl.colors(4, "viridis")[c(1,4,2,3)]
+relabun_com_p<-ord_gdf_long %>%
+  mutate(newHabF=factor(Habitat.group, 
+                        levels=c('longleaf','generalist','hardwood','shrub'))) %>%
+  ggplot()+
   geom_col(aes(x=hab.order, y=rel.abundance, 
-               fill=HabitatF))+
-  scale_fill_viridis_d(name="Habitat\nassociation")+
+               fill=newHabF))+
+  scale_fill_manual(name="Habitat\nassociation",
+                    values=hcl.colors(4, "viridis")[c(4,1,3,2)])+
   scale_x_continuous(name='RCW habitat score',
                      breaks=c(seq(1,218,25),218),
                      labels=hab_breaks[c(seq(1,218,25),218)],
@@ -168,28 +179,41 @@ ggplot(ord_gdf_long)+
   scale_y_continuous(name='Relative Abundance',
                      expand=c(0,0),
                      labels=scales::percent)+
-  theme(axis.text.x = element_text(angle=90, hjust=0.9),
-        axis.text.y = element_text(angle=90, hjust=0.5))+
-  coord_flip()+theme_cowplot()
-ggsave('Umbrella/results/Figures/Fig8_habitat_sitecom_ra.tiff',
-       width=5, height=7.5)
+  theme_cowplot()+
+  theme(legend.position='top',
+        legend.justification="right",
+        legend.text = element_text(size=11),
+        legend.title=element_text(size=11))+
+  coord_flip()+
+  guides(fill=guide_legend(nrow=2, byrow=T))
 
 #plot with bird density
-ggplot(ord_gdf_long)+
+dens_com_p<-ord_gdf_long %>%
+  mutate(newHabF=factor(Habitat.group, 
+                        levels=c('longleaf','generalist','hardwood','shrub'))) %>%
+  ggplot()+
   geom_col(aes(x=hab.order, y=`Birds/sqkm`, 
-               fill=HabitatF))+
-  scale_fill_viridis_d(name="Habitat\nassociation")+
+               fill=newHabF))+
+  scale_fill_manual(name="Habitat\nassociation",
+                    values=hcl.colors(4, "viridis")[c(4,1,3,2)])+
   scale_x_continuous(name='RCW habitat score',
                      breaks=c(seq(1,218,25),218),
                      labels=hab_breaks[c(seq(1,218,25),218)],
                      expand = c(0,0))+
   scale_y_continuous(name=expression('Birds / km'^2),
                      expand=c(0,0))+
-  theme(axis.text.x = element_text(angle=90, hjust=0.9),
-        axis.text.y = element_text(angle=90, hjust=0.5))+
-  coord_flip()+theme_cowplot()
-ggsave('Umbrella/results/Figures/Fig8_habitat_sitecom_birddens.tiff',
-       width=5, height=7.5)
+  theme_cowplot()+
+  theme(legend.position='top',
+        axis.title.y = element_text(color='white',size=1),
+        axis.text.y=element_blank(),
+        legend.title = element_text(size=10, color = "transparent"),
+        legend.text = element_text(size=10, color = "transparent"))+
+  coord_flip()+
+  guides(fill=guide_legend(nrow=2, byrow=T, override.aes=list(alpha=0)))
+plot_grid(relabun_com_p, dens_com_p, align = "h", axis='b', labels='AUTO',
+          rel_widths = c(1,.9))
+ggsave('Umbrella/results/Figures/Fig8_habitat_sitecom_altcol.tiff',
+       width=6.5, height=7)
 
 # Figure 5 Total Abundance Box Plots ----
 hab_abun_plot<-ord_gdf_long %>%

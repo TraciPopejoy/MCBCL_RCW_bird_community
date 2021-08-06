@@ -176,6 +176,8 @@ abundance_summary %>%
 # csv from U_simple_occ.R
 top_occ_mod <- read.csv('./Umbrella/SimpleOcc/top_occupancy_models.csv')
 occ_coef_trans <- read.csv('Umbrella/SimpleOcc/occu_model_parameter_transformations.csv')
+occ_gdf<-read.csv('Umbrella/SimpleOcc/occupancy_hab_coef_est.csv')
+
 top_rcw_mod_sum<-top_occ_mod %>%
   filter(!is.na(psi.USFS_s.)) %>%
   select(rowname, spp, year, psi.USFS_s., AICc, delta) %>%
@@ -190,11 +192,8 @@ new_mod_info %>% filter(parameter=='psi.USFS_s') %>%
   mutate(signif=case_when(logit.025 > 0 & logit.975 > 0 ~ 'positive',
                           logit.025 < 0 & logit.975 > 0 ~ 'no effect',
                           logit.025 < 0 & logit.975 < 9 ~ 'negative')) %>%
-  left_join(bird.assem, by=c('spp'='Species code')) %>%
-  filter(Habitat.group=='generalist' & signif=='positive') %>% count(spp)
+  left_join(bird.assem, by=c('spp'='Species code'))
 
-occ_gdf<-read.csv('Umbrella/SimpleOcc/occupancy_hab_coef_est.csv')
-top_occ_mod<-read.csv('Umbrella/SimpleOcc/top_occupancy_models.csv')
 occ_table<-occ_gdf %>% filter(rowname=='USFS_s') %>%
   left_join(top_occ_mod %>% select(spp, year, rowname, delta), 
             by=c('spp','year', 'model_n'='rowname')) %>%
@@ -251,7 +250,7 @@ y.var <- sapply(ggplot_build(oc)$layout$panel_scales_y,
 # how many unique x-axis values are in each facet
 ocp$heights[ocp$layout$t[grepl("panel", ocp$layout$name)]] <- ocp$heights[ocp$layout$t[grepl("panel", ocp$layout$name)]] * y.var
 grid.draw(ocp)
-ggsave('Umbrella/results/Figures/Fig6b_coeffs_210325.jpg', grid.draw(ocp),
+ggsave('Umbrella/results/Figures/Fig6b_coeffs_210325.svg', grid.draw(ocp),
        width=4, height=7)
 
 # Abundance side of the graph
@@ -302,7 +301,7 @@ oh<-booted_mod %>%
              strip.position = 'left')+
   scale_x_continuous('Coefficient', 
                      expand=c(0.04,0),
-                     breaks = c(-1, -0.5,0,1,3,6))+
+                     breaks = c(-1, -0.5,0,0.25,.5,.75,1,3,6))+
   scale_y_discrete('')+
   scale_color_viridis_d('',end=.6)+
   theme_cowplot() +
@@ -328,7 +327,7 @@ y.var <- sapply(ggplot_build(oh)$layout$panel_scales_y,
 # how many unique x-axis values are in each facet
 ohp$heights[ohp$layout$t[grepl("panel", ohp$layout$name)]] <- ohp$heights[ohp$layout$t[grepl("panel", ohp$layout$name)]] * y.var
 grid.draw(ohp)
-ggsave('Umbrella/results/Figures/Fig6a_coeffs_210325.jpg', grid.draw(ohp),
+ggsave('Umbrella/results/Figures/Fig6a_coeffs_210325.svg', grid.draw(ohp),
        width=2, height=6.4)
 
 # Table 3 ----

@@ -82,7 +82,7 @@ model.appendix.all<-bind_rows(model.appendix, best_bad_models) %>%
 write.csv(model.appendix.all, 'Umbrella/model.appendix.20201116.csv')
 
 model.appendix.all<-read.csv('Umbrella/model.appendix.20201116.csv')
-# Figure S1 parameter barchart ----
+# Figure S2 parameter barchart ----
 mod_parm<-model.appendix.all %>% filter(model.rank==1) %>%
   dplyr::select(species, formula) %>%
   separate(formula, into=paste0('X', 1:7)) %>%
@@ -121,7 +121,7 @@ dist.det.p<-ggplot()+
   scale_y_continuous(expand=c(0,0))+
   theme_cowplot()+
   theme(axis.title.y=element_blank())
-
+ggsave('Umbrella/results/Figures/FigS2_onlyDist.jpg', width=2.75, height=2.75)
 #read in and create occupancy model parameter graph
 top_occ_mod <- read.csv('Umbrella/SimpleOcc/top_occupancy_models.csv')
 occ.det.p<-new_mod_info %>% 

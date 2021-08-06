@@ -10,7 +10,7 @@ Code to run the distance sampling models in Distance. This creates one file for 
 3. **U_dist_mod_analysis.R** 
 Evaluates all the distance models run and identifies the best model. Best models are defined as those that match reality (GOF p value > 0.05) and have the lowest AIC. If no models match reality, we take the lowest AIC value from the five models with the highest GOF p value. 
 - Table S3: description of Detection Probability models from distance sampling
-- Figure S1: graph of count of model parameters from the top models
+- Figure S2: graph of count of model parameters from the top models
 - model.appendix.all: table of top distance sampling models
 
 4. **U_model_abundance.R**
