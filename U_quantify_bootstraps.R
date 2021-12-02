@@ -184,8 +184,8 @@ top_rcw_mod_sum<-top_occ_mod %>%
   group_by(spp, year) %>%
   mutate(deltaRCW=AICc-min(AICc))
 new_mod_info<-occ_coef_trans %>% 
-  left_join(top_occ_mod, by=c('spp', 'year', 'mod_name'='rowname'))
-
+  left_join(top_occ_mod, by=c('spp', 'year', 'mod_name'='rowname')) 
+ 
 new_mod_info %>% filter(parameter=='psi.USFS_s') %>%
   select(-starts_with('p.'),-starts_with('OR.'), -weight, -delta, -AICc, 
          -logLik, -df, -psi.Int., -psi.USFS_s.) %>%
@@ -203,8 +203,7 @@ oc<-new_mod_info %>%
   filter(parameter=='psi.USFS_s') %>%
   select(spp, year, starts_with("OR.")) %>%
   left_join(bird.assem, by=c('spp'='Species code')) %>%
-  filter(spp!="TUTI" | year!="2009",
-         spp!="RCWO") %>%
+  filter(spp!="RCWO") %>%
   mutate(HabF=factor(Habitat.group, 
                      levels=c('longleaf', 'generalist','hardwood', 'shrub')),
          year=as.factor(year)) %>%

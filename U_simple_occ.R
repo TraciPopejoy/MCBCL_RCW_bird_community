@@ -1,7 +1,7 @@
 #Simple Occupancy models based on point counts
 # TPD Mar 12, 20201
 library(tidyverse); library(unmarked); library(MuMIn)
-library(AICcmodavg)
+library(AICcmodavg); library(cowplot)
 
 source('Umbrella/U_load_data.R')
 head(DCERP_filt)
@@ -45,7 +45,7 @@ phi_cov<-list(temp = scaled_phi_cov %>% select(`Pt name`, visit, temp_s) %>%
 species<-c('NOCA','NOBO','EATO','PIWA','EAWP','BHCO','MODO',
            'RHWO','PRAW','WEVI','NOFL','YTWA','RBWO','INBU',
            'SUTA','CACH','COYE','BLJA','RCWO','AMCR','BACS',
-           'GCFL','BGGN','TUTI','CARW','BHNU','CHSP','EABL')
+           'GCFL','BGGN','CARW','BHNU','CHSP','EABL')
 #gcfl chsp has variance isses
 #EATO (NONE) eawp rhwo praw wevi suta bacs messed up, run separately
 # Set up for loop to run through and save each year x species combination ----
@@ -139,8 +139,6 @@ write_csv(occ_gdf, 'Umbrella/SimpleOcc/occupancy_hab_coef_est.csv')
 write_csv(occ_info,'Umbrella/SimpleOcc/occupancy_estimates.csv')
 write_csv(chi.all, 'Umbrella/SimpleOcc/occupancy_gof.csv')
 
-
-
 chi.all %>%
   filter(pval<0.1) %>%
   left_join(top_occ_mod,
@@ -153,6 +151,72 @@ chi.all %>% group_by(species, year) %>%
   count() %>% arrange(desc(n))
 
 top_occ_mod %>% filter(spp=='BHCO' & year == 2009)
+#TUTI problem ----
+#remove the one time it wasn't detected at all
+bird_det_alt<-spfilter("TUTI") %>% 
+  select(Species, `Pt name`, Replicate, Year) %>%
+  group_by(`Pt name`, Replicate, Year) %>% slice(1) %>%
+  filter(`Pt name` != 'EXP19') %>%
+  mutate(presence=ifelse(is.na(Species), 0, 1),
+         visit=paste0('v',Year, '.', Replicate)) %>%
+  group_by(`Pt name`) %>% 
+  select(`Pt name`, visit, presence) %>%
+  arrange(visit) %>%
+  pivot_wider(names_from=visit, values_from=presence) %>%
+  ungroup() %>% select(-`Pt name`) %>% as.matrix()
+
+occ_cov_alt <- DCERP_filt %>% group_by(`Pt name`) %>% 
+  filter(`Pt name` != 'EXP19') %>% slice(1) %>%
+  filter(!is.na(USFS_hab_index)) %>%
+  summarize(meanUSFS=mean(USFS_hab_index)) %>%
+  ungroup() %>%
+  mutate(USFS_s=scale(meanUSFS)[,1])
+
+rn_df_alt<-unmarkedFrameOccu(y=bird_det_alt[,grep('2009', colnames(bird_det_alt))],
+                             siteCovs = occ_cov_alt,
+                             obsCovs = lapply(list(temp = scaled_phi_cov %>% filter(`Pt name` != 'EXP19') %>% select(`Pt name`, visit, temp_s) %>%
+                                                     pivot_wider(names_from=visit, values_from=temp_s) %>% select(-`Pt name`),
+                                                   cloud = scaled_phi_cov %>% filter(`Pt name` != 'EXP19') %>%select(`Pt name`, visit, cloud_s) %>%
+                                                     pivot_wider(names_from=visit, values_from=cloud_s) %>% select(-`Pt name`),
+                                                   wind = scaled_phi_cov %>% filter(`Pt name` != 'EXP19') %>%select(`Pt name`, visit, wind_s) %>%
+                                                     pivot_wider(names_from=visit, values_from=wind_s) %>% select(-`Pt name`),
+                                                   noise = scaled_phi_cov %>% filter(`Pt name` != 'EXP19') %>%select(`Pt name`, visit, noise_s) %>%
+                                                     pivot_wider(names_from=visit, values_from=noise_s) %>% select(-`Pt name`),
+                                                   minAmid = scaled_phi_cov %>% filter(`Pt name` != 'EXP19') %>%select(`Pt name`, visit, nMinAfterMid_s) %>%
+                                                     pivot_wider(names_from=visit, values_from=nMinAfterMid_s) %>% select(-`Pt name`),
+                                                   obs = scaled_phi_cov %>% filter(`Pt name` != 'EXP19') %>%select(`Pt name`, visit, OBS) %>%
+                                                     pivot_wider(names_from=visit, values_from=OBS) %>% select(-`Pt name`),
+                                                   rep = scaled_phi_cov %>% filter(`Pt name` != 'EXP19') %>%select(`Pt name`, visit, Rep_s) %>%
+                                                     pivot_wider(names_from=visit, values_from=Rep_s) %>% select(-`Pt name`)), 
+                                              function(x) x[grep(y, colnames(x))]))
+
+rn_alt <- occu(~ temp+cloud+wind+noise+minAmid+obs+rep ~ USFS_s, rn_df_alt)
+occ_d_alt<-dredge(rn_alt)
+tm_alt<-get.models(occ_d_alt, subset=T)
+
+occ_d_alt %>% as_tibble() %>%
+  rowid_to_column() %>%
+  filter(!is.na(`psi(USFS_s)`)) %>% View()
+
+tuti.alt.pred <- predict(tm_alt[[12]], type="state", 
+                         newdata=usfs_grad,
+                         appendData=TRUE)
+ggplot(tuti.alt.pred)+
+  geom_ribbon(aes(x=USFS_r, y=Predicted, 
+                  ymin=lower, ymax=upper),
+              alpha=0.5)+
+  geom_line(aes(x=USFS_r, y=Predicted))+
+  scale_y_continuous('Detection Probability',
+                     limit = c(0,1))+
+  scale_color_grey(guide=F, aesthetics=c('fill','color'))+
+  scale_linetype(guide=F)+
+  theme_cowplot()+
+  theme(axis.title = element_text(size=11),
+        axis.text=element_text(size=10))
+
+saveRDS(tm_alt, 'Umbrella/SimpleOcc/topmodels/TUTI_2009.rds')
+score_tm<-get.models(occ_d_alt[!is.na(occ_d_alt$`psi(USFS_s)`),][1,], subset=T)
+saveRDS(score_tm, 'Umbrella/SimpleOcc/topmodels/TUTI_2009_rcwdet.rds')
 
 #Quantify Odds Ratio ----
 occ_coef_trans<-NULL
@@ -188,15 +252,30 @@ for(i in list.files("./Umbrella/SimpleOcc/topmodels/",
   pred_df<-predict(model[[1]], type='state', newdata=nd) %>% 
     bind_cols(nd) %>%
     mutate(model=ifelse(substr(i, 48, 52)==".rds","top model","model w/ RCW score"),
-           taxa=substr(i,39, 42),
-           year=substr(i, 44, 47),
+           taxa=substr(i,32, 35),
+           year=substr(i, 37, 40),
            rcw.det = det_val)
   all_pred_df<-bind_rows(all_pred_df, pred_df)
 } 
 
 all_pred_df  %>% group_by(model) %>% count() %>% mutate(n/86)
+
+all_pred_df %>% left_join(bird.assem, by=c('taxa'='Species code')) %>%
+  filter(Habitat.group %in% c('shrub','hardwood'),
+         rcw.det=='habitat->occu') %>%
+  ggplot()+
+  geom_ribbon(aes(x=RCW, y=Predicted,
+                  ymin=lower, ymax=upper,
+                  fill=year), alpha=0.5)+
+  geom_line(aes(x=RCW, y=Predicted, group=year))+
+  scale_y_continuous("Occupancy Probability", 
+                     breaks=seq(0,1,.33),
+                     limits=c(0,1))+
+  scale_x_continuous("RCW score")+
+  facet_wrap(~taxa, nrow=2)
+
 library(ggforce)
-pdf('Umbrella/SimpleOcc_rcwdet/visualize_simple_occ.pdf')
+pdf('Umbrella/SimpleOcc/visualize_simple_occ.pdf')
 for(k in 1:2){
   print(all_pred_df %>%
           filter(model=='top model') %>%
@@ -356,7 +435,7 @@ occ.det.models<-occ_coef_trans %>%
 top_occ_mod %>% filter(delta==0) %>%
   bind_rows(top_occ_mod %>% filter(!is.na(psi.USFS_s.)) %>%
               group_by(spp, year) %>% slice(1)) %>%
-  filter(!duplicated(.)) %>%  View()
+  filter(!duplicated(.)) %>% 
   select(spp, year, p.cloud.:df, AICc, delta) %>%
   arrange(spp) %>% #View()
   left_join(bird.assem, by=c('spp'='Species code')) %>% 
@@ -412,7 +491,12 @@ top_occ_mod %>% filter(delta==0) %>%
   count(Habitat.group)
 
 # Figure S1 ----
-bp<-top_occ_mod %>% filter(delta==0) %>% distinct(.) %>%
+library(grid)
+bp<-top_occ_mod %>% 
+  #fixing TUTI
+  filter(species != 'TUTI' & year != 2009) %>% 
+  bind_rows(data.frame(spp='TUTI', year=2009, psi.USFS_s.=NA, delta=0, AICc=808.28)) %>%
+  filter(delta==0) %>% distinct(.) %>%
   rename(model_n=rowname) %>%
   dplyr::select(spp, year, starts_with('psi'), AICc, delta, model_n) %>%
   mutate(RCW_yn=factor(case_when(is.na(psi.USFS_s.)~'neutral',
@@ -485,161 +569,3 @@ occ_gdf %>%
          ll=exp(Estimate-SE),
          pe=exp(Estimate),
          ym=paste(year, model))
-
-
-
-#TUTI problem ----
-bird_det<-spfilter("TUTI") %>% 
-  select(Species, `Pt name`, Replicate, Year) %>%
-  group_by(`Pt name`, Replicate, Year) %>% slice(1) %>%
-  mutate(presence=ifelse(is.na(Species), 0, 1),
-         visit=paste0('v',Year, '.', Replicate)) %>%
-  group_by(`Pt name`) %>% 
-  select(`Pt name`, visit, presence) %>%
-  arrange(visit) %>%
-  pivot_wider(names_from=visit, values_from=presence) %>%
-  ungroup() %>% select(-`Pt name`) %>% as.matrix()
-
-library(unmarked)
-for(y in c('2009')){
-  rn_df<-unmarkedFrameOccu(y=bird_det[,grep(y, colnames(bird_det))],
-                           siteCovs = occ_cov,
-                           obsCovs = lapply(phi_cov, function(x) x[grep(y, colnames(x))]))
-  
-  rn <- occu(~ temp+cloud+wind+noise+minAmid+obs+rep ~ USFS_s, rn_df,
-             starts=c(rep(0,10)))
-  occ_d<-dredge(rn)
-  tm<-get.models(occ_d, subset=T)
-}
-bird_det %>% as_tibble() %>%
-  pivot_longer(cols=everything()) %>%
-  ggplot() +geom_col(aes(x=name, y=value))+
-  geom_hline(yintercept = nrow(bird_det))
-
-tuti_df<-spfilter("TUTI") %>% as_tibble()
-tuti_df %>%  group_by(`Pt name`, Replicate, Year) %>% 
-  #filter(duplicated(`Pt name`, Replicate, Year)) %>% View()
-  slice(1) %>%
-  mutate(presence=ifelse(is.na(Species), 0, 1),
-         visit=paste0('v',Year, '.', Replicate)) %>%
-  ungroup() %>%
-  ggplot(aes(x=USFS_hab_index, y=presence))+
-  geom_point(aes(color=as.factor(presence)),
-             alpha=0.1)+
-  geom_smooth(method='glm',
-              method.args = list(family = "binomial"))+
-  scale_color_viridis_d(end=.8,guide=F)+
-  facet_grid(Replicate~Year)+
-  theme_bw()
-ggsave('TUTI_occupancy_graph.jpg', width=4, height=7)
-#predictions from top 2009 model 
-
-tuti.psi.09 <- predict(tm[[1]], type="state", 
-                      newdata=usfs_grad, appendData=TRUE)
-ggplot(tuti.psi.09)+
-  geom_ribbon(aes(x=USFS_r, y=Predicted, 
-                  ymin=lower, ymax=upper),
-              alpha=0.5)+
-  geom_line(aes(x=USFS_r, y=Predicted))+
-  scale_x_continuous('RCW Habitat Score',
-                     breaks=c(2.5, 3.26, 3.76, 4.26, 4.76))+
-  scale_y_continuous('Proportion of Sites Occupied',
-                     limit = c(0,1))+
-  scale_color_grey(guide=F, aesthetics=c('fill','color'))+
-  scale_linetype(guide=F)+
-  theme_cowplot()+
-  theme(axis.title = element_text(size=11),
-        axis.text=element_text(size=10))
-ggsave('TUTI_predicted_occup.jpg', width=3, height=3)
-tuti_df %>%
-  group_by(`Pt name`, Replicate, Year) %>%
-  mutate(`Cluster size`=case_when(is.na(Species)~0,
-                                  T~`Cluster size`),
-         nTUTI=sum(`Cluster size`)) %>%
-  ggplot(aes(x=USFS_hab_index, y=nTUTI))+
-  geom_point(aes(color=Replicate),
-             position=position_jitter(height = 0.1),
-             alpha=0.1)+
-  facet_wrap(~Year)+
-  scale_y_continuous('number of TUTI at point')+
-  scale_x_continuous('RCW habitat score')+
-  theme_bw()
-ggsave('TUTI_counts.jpg', width=6, height=4)
-# investigating detection
-summary(phi_cov$wind)
-tuti.det.09 <- predict(tm[[1]], type="det", 
-                       newdata=bind_cols(usfs_grad,
-                                         wind=seq(-1.4,1.1, length=50)),
-                       appendData=TRUE)
-ggplot(tuti.det.09)+
-  geom_ribbon(aes(x=wind, y=Predicted, 
-                  ymin=lower, ymax=upper),
-              alpha=0.5)+
-  geom_line(aes(x=wind, y=Predicted))+
-  scale_y_continuous('Detection Probability',
-                     limit = c(0,1))+
-  scale_color_grey(guide=F, aesthetics=c('fill','color'))+
-  scale_linetype(guide=F)+
-  theme_cowplot()+
-  theme(axis.title = element_text(size=11),
-        axis.text=element_text(size=10))
-ggsave()
-#remove the one time it wasn't detected at all
-bird_det_alt<-spfilter("TUTI") %>% 
-  select(Species, `Pt name`, Replicate, Year) %>%
-  group_by(`Pt name`, Replicate, Year) %>% slice(1) %>%
-  filter(`Pt name` != 'EXP19') %>%
-  mutate(presence=ifelse(is.na(Species), 0, 1),
-         visit=paste0('v',Year, '.', Replicate)) %>%
-  group_by(`Pt name`) %>% 
-  select(`Pt name`, visit, presence) %>%
-  arrange(visit) %>%
-  pivot_wider(names_from=visit, values_from=presence) %>%
-  ungroup() %>% select(-`Pt name`) %>% as.matrix()
-
-occ_cov_alt <- DCERP_filt %>% group_by(`Pt name`) %>% 
-  filter(`Pt name` != 'EXP19') %>% slice(1) %>%
-  filter(!is.na(USFS_hab_index)) %>%
-  summarize(meanUSFS=mean(USFS_hab_index)) %>%
-  ungroup() %>%
-  mutate(USFS_s=scale(meanUSFS)[,1])
-
-rn_df_alt<-unmarkedFrameOccu(y=bird_det_alt[,grep('2009', colnames(bird_det_alt))],
-                           siteCovs = occ_cov_alt,
-                           obsCovs = lapply(list(temp = scaled_phi_cov %>% filter(`Pt name` != 'EXP19') %>% select(`Pt name`, visit, temp_s) %>%
-                                                   pivot_wider(names_from=visit, values_from=temp_s) %>% select(-`Pt name`),
-                                                 cloud = scaled_phi_cov %>% filter(`Pt name` != 'EXP19') %>%select(`Pt name`, visit, cloud_s) %>%
-                                                   pivot_wider(names_from=visit, values_from=cloud_s) %>% select(-`Pt name`),
-                                                 wind = scaled_phi_cov %>% filter(`Pt name` != 'EXP19') %>%select(`Pt name`, visit, wind_s) %>%
-                                                   pivot_wider(names_from=visit, values_from=wind_s) %>% select(-`Pt name`),
-                                                 noise = scaled_phi_cov %>% filter(`Pt name` != 'EXP19') %>%select(`Pt name`, visit, noise_s) %>%
-                                                   pivot_wider(names_from=visit, values_from=noise_s) %>% select(-`Pt name`),
-                                                 minAmid = scaled_phi_cov %>% filter(`Pt name` != 'EXP19') %>%select(`Pt name`, visit, nMinAfterMid_s) %>%
-                                                   pivot_wider(names_from=visit, values_from=nMinAfterMid_s) %>% select(-`Pt name`),
-                                                 obs = scaled_phi_cov %>% filter(`Pt name` != 'EXP19') %>%select(`Pt name`, visit, OBS) %>%
-                                                   pivot_wider(names_from=visit, values_from=OBS) %>% select(-`Pt name`),
-                                                 rep = scaled_phi_cov %>% filter(`Pt name` != 'EXP19') %>%select(`Pt name`, visit, Rep_s) %>%
-                                                   pivot_wider(names_from=visit, values_from=Rep_s) %>% select(-`Pt name`)), 
-                                            function(x) x[grep(y, colnames(x))]))
-  
-rn_alt <- occu(~ temp+cloud+wind+noise+minAmid+obs+rep ~ USFS_s, rn_df_alt,
-             starts=c(rep(0,10)))
-occ_d_alt<-dredge(rn_alt)
-tm_alt<-get.models(occ_d_alt, subset=T)
-
-tuti.alt.pred <- predict(tm_alt[[1]], type="state", 
-                       newdata=usfs_grad,
-                       appendData=TRUE)
-ggplot(tuti.alt.pred)+
-  geom_ribbon(aes(x=USFS_r, y=Predicted, 
-                     ymin=lower, ymax=upper),
-                 alpha=0.5)+
-  geom_line(aes(x=USFS_r, y=Predicted))+
-  scale_y_continuous('Detection Probability',
-                     limit = c(0,1))+
-  scale_color_grey(guide=F, aesthetics=c('fill','color'))+
-  scale_linetype(guide=F)+
-  theme_cowplot()+
-  theme(axis.title = element_text(size=11),
-        axis.text=element_text(size=10))
-ggsave('TUTI_remove_outlier.jpg',width=3, height=3)
