@@ -54,7 +54,7 @@ setdiff(ideal_model_list,
 # identify which models explained detection well
 model.appendix<-all_models %>% as_tibble() %>%
   group_by(species) %>%
-  filter(gof_cvm_p >= 0.050,
+  filter(#gof_cvm_p >= 0.050,
          AIC > 0) %>%
   mutate(deltaAICc=AICc - min(AICc),
          dAIC=AIC-min(AIC)) %>%
@@ -65,28 +65,28 @@ model.appendix
 length(unique(model.appendix$species))
 
 #species with models that do not fit reality
-species[!(species %in% model.appendix$species)]
-best_bad_models<-all_models %>% 
-  filter(species %in% species[!(species %in% model.appendix$species)]) %>%
-  group_by(species) %>%
-  arrange(desc(gof_cvm_p), AICc) %>%
-  slice(1:5) %>%
-  filter(AICc == min(AICc)) %>% 
-  slice(1) %>%
+#species[!(species %in% model.appendix$species)]
+#best_bad_models<-all_models %>% 
+ # filter(species %in% species[!(species %in% model.appendix$species)]) %>%
+#  group_by(species) %>%
+ # arrange(desc(gof_cvm_p), AICc) %>%
+#  slice(1:5) %>%
+ # filter(AICc == min(AICc)) %>% 
+#  slice(1) %>%
   #left_join(model_parameters, by='model.n') %>%
-  dplyr::select(-model.state)
+ # dplyr::select(-model.state)
 
-model.appendix.all<-bind_rows(model.appendix, best_bad_models) %>%
-  group_by(species) %>% mutate(model.rank=rank(deltaAICc))
+#model.appendix.all<-bind_rows(model.appendix) %>%
+#  group_by(species) %>% mutate(model.rank=rank(deltaAICc))
 
-write.csv(model.appendix.all, 'Umbrella/model.appendix.20201116.csv')
+write.csv(model.appendix, 'Umbrella/model.appendix.20221111.csv')
 
-model.appendix.all<-read.csv('Umbrella/model.appendix.20201116.csv')
+model.appendix.all<-read.csv('Umbrella/model.appendix.20221111.csv')
 # Figure S2 parameter barchart ----
-mod_parm<-model.appendix.all %>% filter(model.rank==1) %>%
+mod_parm<-model.appendix %>% filter(deltaAICc==0) %>% #model.rank==1) %>%
   dplyr::select(species, formula) %>%
-  separate(formula, into=paste0('X', 1:7)) %>%
-  #arrange(X7)%>%
+  separate(formula, into=paste0('X', 1:10)) %>%
+#arrange(X7)%>%
   dplyr::select(-X1) %>%
   pivot_longer(-species) %>%
   filter(!is.na(value))%>%

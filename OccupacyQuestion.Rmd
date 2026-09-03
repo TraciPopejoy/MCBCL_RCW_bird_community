@@ -1,0 +1,259 @@
+---
+title: "Occupancy Question"
+author: "JR Walters & TPDubose"
+date: "2/2/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse); library(unmarked); library(MuMIn)
+source('Umbrella/U_load_data.R')
+```
+So we have point-count data collected at 148 sites from two years (2 were not visited in 2010). Each point was visited 4 times within each year. We want to figure out the occupancy of each species and a species occupancy relationship with red cockaded woodpecker management. The manuscript's question is: does red cockaded woodpecker management increase the presence of these bird species?
+
+Questions I have:   
+1.  Should we use the dynamic occupancy model or two simple, closed occupancy model?  
+2.  Should we use RCW habitat score as a category or continuous variable?   
+3.  Are my models overfitted by including RCW habitat score in the detection function? And is it psuedoreplication to include RCW habitat score in the detection function if it doesn't vary between sites?  
+4.  Should Table S2 also contain mean detection for that species?   
+
+I decided to fit a dynamic occupancy model (following MacKenzie et al. 2003) to incorporate data from both years into one occupancy model. From my understanding, this model will treat each year (primary sampling period) as a closed population and between years as an open population. Within years, detection probabilities are calculated from detection histories. So to calculate for species occupancy in one year (MacKenzie et al. 2002), you account for the detection probabilities and solve for phi.
+
+$$
+Pr(X_i = 1011)=phi_i*p_1(1-p_2)p_3p_4
+$$
+To account for colonization and extinction between years, two parameters are added to the model. Using matrix multiplication, the probability of colonization and extinction are added to the likelihood functions. Table 1 in MacKenzie et al. 2003 is very handy; it shows the matrix multiplication and resulting likelihood for different detection probabilities. Essentially, each detection history is the combined probability of initial occupancy * detection probabilities at each time * colonization & extintion matrix * final detection probability. 
+
+The likelihood function is then the likelihood of occupancy, colonization, extinction, and detection given these detection history probabilities. We can fit functions to these estimated probabilities using the logistic model (linear effects on a probability) where Y is the matrix of covariate information, and beta is the vector of logistic model coefficients to be estimated:
+$$
+\theta=\frac{\mathrm{exp}(Y\beta)}{1+\mathrm{exp}(Y\beta)}
+$$
+
+I used the *colext* function in the ***unmarked*** package to run these models, with extinction and colonization only having intercepts, occupancy as a function of RCW habitat score, and detection as a function of visit covariates and RCW habitat score. All continuous variables have been scaled and centered. Observer and Year are the only factors variables.  
+
+After some data manipulation, we have the following components that I then feed into the *colext* function. 
+```{r prepare covariates, echo=F}
+# Prepare common covariates (site, point, year) -----
+site_cov <- DCERP_filt %>% group_by(`Pt name`) %>% slice(1) %>%
+  filter(!is.na(USFS_hab_index))%>%
+  select(`Pt name`, Base_Area)
+
+occ_cov <- DCERP_filt %>% group_by(`Pt name`) %>% slice(1) %>%
+  filter(!is.na(USFS_hab_index)) %>%
+  summarize(meanUSFS=mean(USFS_hab_index)) %>%
+  ungroup() %>%
+  mutate(USFS_s=scale(meanUSFS)[,1])
+
+year_cov<-DCERP_filt %>% group_by(`Pt name`, Year) %>% slice(1) %>%
+  filter(!is.na(USFS_hab_index))%>%
+  ungroup() %>%
+  mutate(USFS_s=scale(USFS_hab_index)[,1],
+         year=paste0('v',Year),
+         Year_c=as.character(Year))%>%
+  select(`Pt name`, year, Year_c, USFS_s)%>%
+  pivot_wider(names_from = year, values_from = c(Year_c, USFS_s))
+
+year_covl<-list(year=year_cov[,2:3] %>% as.data.frame(),
+                usfs=year_cov[,4:5] %>% as.data.frame())
+
+scaled_phi_cov<-DCERP_filt %>% group_by(`Pt name`, Replicate, Year) %>% slice(1) %>%
+  filter(!is.na(USFS_hab_index)) %>%
+  ungroup() %>%
+  mutate(visit=paste0('v',Year, '.', Replicate),
+         temp_s=scale(Temp)[,1], 
+         cloud_s=scale(Clouds)[,1], 
+         wind_s=scale(Wind)[,1], 
+         noise_s=scale(Noise)[,1], 
+         nMinAfterMid_s=scale(nMinAfterMid)[,1],
+         Rep_s=scale(Replicate)[,1]) %>%
+  select(`Pt name`, Replicate, Year, visit, 
+         temp_s, cloud_s, wind_s, noise_s, nMinAfterMid_s, OBS, Rep_s) %>%
+  arrange(visit)
+
+phi_cov<-list(temp = scaled_phi_cov %>% select(`Pt name`, visit, temp_s) %>%
+                pivot_wider(names_from=visit, values_from=temp_s) %>%
+                select(-`Pt name`),
+              cloud = scaled_phi_cov %>% select(`Pt name`, visit, cloud_s) %>%
+                pivot_wider(names_from=visit, values_from=cloud_s) %>%
+                select(-`Pt name`),
+              wind = scaled_phi_cov %>% select(`Pt name`, visit, wind_s) %>%
+                pivot_wider(names_from=visit, values_from=wind_s) %>%
+                select(-`Pt name`),
+              noise = scaled_phi_cov %>% select(`Pt name`, visit, noise_s) %>%
+                pivot_wider(names_from=visit, values_from=noise_s) %>%
+                select(-`Pt name`),
+              minAmid = scaled_phi_cov %>% select(`Pt name`, visit, nMinAfterMid_s) %>%
+                pivot_wider(names_from=visit, values_from=nMinAfterMid_s) %>%
+                select(-`Pt name`),
+              obs = scaled_phi_cov %>% select(`Pt name`, visit, OBS) %>%
+                pivot_wider(names_from=visit, values_from=OBS) %>% 
+                select(-`Pt name`),
+              rep = scaled_phi_cov %>% select(`Pt name`, visit, Rep_s) %>%
+                pivot_wider(names_from=visit, values_from=Rep_s) %>% select(-`Pt name`))
+
+bird_det<-spfilter("NOBO") %>% 
+    select(Species, `Pt name`, Replicate, Year) %>%
+    group_by(`Pt name`, Replicate, Year) %>% slice(1) %>%
+    mutate(presence=ifelse(is.na(Species), 0, 1),
+           visit=paste0('v',Year, '.', Replicate)) %>%
+    group_by(`Pt name`) %>% select(`Pt name`, visit, presence) %>%
+    arrange(visit) %>%
+    pivot_wider(names_from=visit, values_from=presence) %>%
+    ungroup() %>% select(-`Pt name`) %>% as.matrix()
+```
+```{r show covariates} 
+bird_det[1:5,] #detection record = y
+occ_cov[1:5,3] #site covariates = siteCovs
+lapply(year_covl, head, n=5) #year covariates = yearlySiteCovs
+lapply(phi_cov, head, n=3) #visit level covariates = obsCovs
+```
+
+Our main covariate of interest is RCW habitat score. This can be a category or a continuous variable. Below is a histogram representing the distribution of the variable, with vertical lines indicating where the category splits are. These categories aim to have equal sample size between the categories. 
+```{r rcw hist, fig.align='center', fig.width=3.5, fig.height=3}
+ggplot()+geom_histogram(aes(x=occ_cov$meanUSFS), bins=35)+
+  geom_vline(aes(xintercept=c(3,3.5,4,4.5)))+scale_x_continuous('RCW habitat score')+theme_bw()
+```
+
+I use a for loop to run through all 28 species. I use the function *dredge* to run through all possible models given the full model. 
+```{r}
+#create the unmarked MultFrame for the function
+umf <- unmarkedMultFrame(y=bird_det, #detection record
+                         siteCovs=occ_cov[,3], #site covariates
+                         yearlySiteCovs=year_covl,
+                         obsCovs=phi_cov,
+                         numPrimary=2)
+  
+#build the giant model to dredge
+bigmod<-colext(psiformula = ~ USFS_s, #initial probability of occupancy at each site
+               gammaformula = ~1, #colonization probability
+               epsilonformula = ~1, #extinction probability
+               pformula = ~temp+cloud+wind+noise+minAmid+obs+rep+USFS_s, #detection probability 
+               data=umf)
+
+occ_d<-dredge(bigmod) #run all sub models for model comparison
+```
+
+I then save both the top model and the top model that includes RCW impact on initial occupancy. I also pull out the logit scale covariates for various tables in the manuscript.
+```{r}
+tm<-get.models(occ_d, subset = delta <= 0)
+ocm_sum<-summary(tm[[1]])
+```
+
+I save the following information for Table 4. This is the top model information for NOBO. 
+```{r}
+bind_rows(ocm_sum$psi %>% rownames_to_column())
+```
+
+To visualize the results, I unscale the RCW habitat score by multiplying the scaled variable by the standard deviation (`r sd(occ_cov$meanUSFS)`) and then adding the mean (`r mean(occ_cov$meanUSFS)`). I create a dataframe that mimics the graph I want to make, which I then feed into the predict function.
+```{r}
+usfs_grad <- data.frame(USFS_s=seq(-2.6, 1.6, length=10)) %>%
+  mutate(USFS_r=USFS_s*0.6950697+3.907453,
+         minAmid=rep(0,10),noise=rep(0,10),rep=rep(0,10),temp=rep(0,10))
+head(usfs_grad)
+```
+
+Using this model and the *predict* function, I've graphed the relationship between RCW habitat score and occupancy and RCW habitat score & detection probability.
+
+```{r prediction graphs, echo=F, fig.align='center', fig.width=3.75, fig.height=3.75}
+predict(tm[[1]], type="psi", newdata=usfs_grad, appendData=TRUE) %>%
+  ggplot()+
+  geom_ribbon(aes(x=USFS_r, y=Predicted, ymin=lower, ymax=upper),
+              fill='lightgrey')+
+  geom_line(aes(x=USFS_r, y=Predicted))+
+  scale_x_continuous('RCW Habitat Score',
+                     breaks=c(2.5, 3.26, 3.76, 4.26, 4.76))+
+  scale_y_continuous('Proportion of Sites Occupied',
+                     limit = c(0,1))+
+  ggtitle("Relationship btwn RCW habitat score & Occupancy")+
+  theme_bw()+
+  theme(axis.title = element_text(size=11),
+        axis.text=element_text(size=10))
+
+predict(tm[[1]], type="det", newdata=usfs_grad, appendData=TRUE) %>%
+  ggplot()+
+  geom_ribbon(aes(x=USFS_r, y=Predicted, ymin=lower, ymax=upper),
+              fill='lightgrey')+
+  geom_line(aes(x=USFS_r, y=Predicted))+
+  scale_x_continuous('RCW Habitat Score',
+                     breaks=c(2.5, 3.26, 3.76, 4.26, 4.76))+
+  scale_y_continuous('Detection Probability',
+                     limit = c(0,1))+
+  ggtitle("Relationship btwn RCW habitat & detection,\nholding other covariates at their mean")+
+  theme_bw()+
+  theme(axis.title = element_text(size=11),
+        axis.text=element_text(size=10))
+```
+
+Table S2 describes the functions used to describe detection. It is taken from the dredged models. Most of the cells indicate a coefficients in the regression; NAs mean that variable isn't included in the function. It also includes model information. We are most interested in the direction and relative magnitude of coefficient because it describes the relationship. The coefficient for RCW habitat in the detection function is 0.2699.
+
+```{r}
+occ_d %>%  filter(delta==0)
+```
+
+# How does RCW habitat score effect detection
+
+As previously discussed, we are worried about the effects of RCW habitat score on detection confusing our primary interest in occupancy. Below is a table listing the direction of the effect RCW habitat score has on detection for each taxa, followed by plots representing the relationship between RCW habitat score and detection with mean values at all other covariates.
+
+```{r sp relationship with detection, echo=F, results='asis'}
+nd_1<-data.frame(matrix(rep(0,length(names(phi_cov))*length(seq(-2.6, 1.6, .1))),
+           ncol=length(names(phi_cov)))) 
+names(nd_1)<-names(phi_cov)
+nd<-nd_1 %>% mutate(USFS_s=seq(-2.6, 1.6, .1),
+                    RCW=(USFS_s*0.6950697)+3.907453,
+                    obs=factor("KRR", levels=c("KRR","LBN")))
+all_pred_df<-NULL
+for(i in list.files("./Umbrella/OccupancyModel/", 
+                    pattern = 'rds', full.names = T)){
+  model<-readRDS(i)
+  det_val<-ifelse(sum(grepl('USFS_s', names(coef(model[[1]][4]))))==1, 
+                                                 "habitat -> det", "no habitat\naffect")
+  pred_df<-predict(model[[1]], type='det', 
+          newdata=nd) %>% 
+    bind_cols(nd) %>%
+    mutate(model=ifelse(substr(i, 35,41)=="mod.rds","top model","model w/ RCW score"),
+           taxa=substr(i,27,30),
+           rcw.det = det_val)
+  all_pred_df<-bind_rows(all_pred_df, pred_df)
+  
+} 
+library(knitr)
+kable(all_pred_df %>% group_by(taxa, model) %>%
+  filter(USFS_s == -2.6 | USFS_s == 1.6) %>% 
+  summarize(Predicted=Predicted,
+            Predict_high=lead(Predicted),
+            USFS_s,
+            diff=Predict_high-Predicted,
+            det_trend= case_when(diff < 0 ~ 'negative',
+                                 diff == 0 ~ 'no effect',
+                                 diff > 0 ~ 'positive'),
+            .groups='drop') %>%
+  filter(!is.na(Predict_high), !duplicated(taxa)) %>% 
+  select(det_trend, taxa) %>% group_by(det_trend) %>%
+  summarize(all_names = paste(taxa, collapse = ", ")))
+```
+
+```{r detection graphs, echo=F, fig.height=8, fig.width=6}
+library(ggforce)
+for(k in 1:2){
+print(all_pred_df %>%
+  ggplot()+
+          geom_ribbon(aes(x=RCW, y=Predicted,
+                          ymin=Predicted-1.96*SE, ymax=Predicted+1.96*SE,
+                          fill=model), alpha=0.5)+
+          geom_line(aes(x=RCW, y=Predicted))+
+          scale_y_continuous("Detection Probability", 
+                             breaks=seq(0,1,.33),
+                             limits=c(0,1))+
+    scale_x_continuous("RCW score")+
+  geom_text(data=all_pred_df %>% group_by(taxa) %>% slice(1),
+            aes(label=rcw.det), x=3.5,y=.80)+
+  facet_wrap_paginate(~taxa, ncol=2, nrow=7, page=k)+
+  scale_fill_viridis_d()+
+  theme_bw())
+}
+
+```
+
+
+

@@ -192,7 +192,7 @@ new_mod_info %>% filter(parameter=='psi.USFS_s') %>%
   mutate(signif=case_when(logit.025 > 0 & logit.975 > 0 ~ 'positive',
                           logit.025 < 0 & logit.975 > 0 ~ 'no effect',
                           logit.025 < 0 & logit.975 < 9 ~ 'negative')) %>%
-  left_join(bird.assem, by=c('spp'='Species code'))
+  left_join(bird.assem, by=c('spp'='Species code')) %>% View()
 
 occ_table<-occ_gdf %>% filter(rowname=='USFS_s') %>%
   left_join(top_occ_mod %>% select(spp, year, rowname, delta), 

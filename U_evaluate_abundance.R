@@ -234,15 +234,44 @@ abund_plot<-ord_gdf_long %>%
   geom_jitter(alpha=0.2)+
   geom_boxplot(outlier.alpha = 0, alpha=0.8, fill='lightgrey')+
   scale_x_discrete(name='RCW habitat score')+
-  scale_y_continuous(expression("Total Birds km"^-2))+
+  scale_y_continuous(expression("Birds km"^-2))+
   theme_cowplot()+
   theme(axis.text.x = element_text(size=11, angle=30, hjust=.9))
 plot_grid(abund_plot, hab_abun_plot, labels=c("       All Birds", ""),
           rel_widths = c(0.43,0.57))
-ggsave('Umbrella/results/Figures/Fig5_bird_abundance.tiff', width=6, height=4)
+ggsave('Umbrella/results/Figures/Fig5_bird_abundance_2025.tiff', width=6, height=4)
 
 write.csv(ord_gdf_long, 'Umbrella/results/plotting_df.csv')
 
+hab.dt<-ord_gdf_long %>%
+  group_by(PtName, HabCatfix, USFS_hab_index, HabitatF) %>%
+  summarize(Total.Birds.sqkm=sum(`Birds/sqkm`), .groups='keep') %>% 
+  mutate(HCf=factor(HabCatfix, level=c(2.5, 3.26, 3.76, 4.26, 4.76)))
+hab.dt$HCf %>% head()
+
+(gen.mod<-kruskal.test(Total.Birds.sqkm ~ HCf, data=hab.dt[hab.dt$HabitatF == 'generalist', ]))
+dunn.test::dunn.test(hab.dt[hab.dt$HabitatF == 'generalist', ]$Total.Birds.sqkm, hab.dt[hab.dt$HabitatF == 'generalist', ]$HCf, 
+                     method='holm')
+(shr.mod<-kruskal.test(Total.Birds.sqkm ~ HCf, data=hab.dt[hab.dt$HabitatF == 'shrub', ]))
+(hw.mod<-kruskal.test(Total.Birds.sqkm ~ HCf, data=hab.dt[hab.dt$HabitatF == 'hardwood', ]))
+(ll.mod<-kruskal.test(Total.Birds.sqkm ~ HCf, data=hab.dt[hab.dt$HabitatF == 'longleaf', ]))
+
+hab.dt %>% group_by(PtName, HCf) %>% 
+  summarize(tbirds=sum(Total.Birds.sqkm)) %>%
+  kruskal.test(tbirds~HCf, data=.)
+
+al.aov<-aov(Total.Birds.sqkm ~ HCf*HabitatF, data=hab.dt)
+summary(al.aov)
+plot(al.aov)
+shapiro.test(resid(al.aov)) # not normal
+hist(hab.dt$Total.Birds.sqkm)
+library(lmerTest)
+min(hab.dt[hab.dt$Total.Birds.sqkm != 0, ]$Total.Birds.sqkm)
+hab.dt1<-hab.dt %>%
+  mutate(Total.Birds.sqkm = ifelse(Total.Birds.sqkm == 0, 0.1, Total.Birds.sqkm))
+car::Anova(glm(Total.Birds.sqkm ~ HCf+HabitatF+HCf:HabitatF, data=hab.dt1, family = Gamma(link="log")))
+summary(glm(Total.Birds.sqkm ~ HCf+HabitatF+HabitatF:HCf, data=hab.dt1, family = Gamma(link="log")))
+plot(glm(Total.Birds.sqkm ~ HCf+HabitatF:HCf, data=hab.dt1, family = Gamma(link="log")))
 # Table S4 and Figure S2 detection information from bootstraps -----
 abundance_good<-read.csv('Umbrella/results/abundance_used_quant.csv')
 # want a table of species x habitat category detection

@@ -1,7 +1,7 @@
 ### Loading Distance Sampling data ###
 library(tidyverse); library(readxl); library(Distance); library(lubridate)
 
-files<-list.files('G://Shared drives/RCW Conservation Postdoc/Umbrella species paper/Data/',
+files<-list.files('G:/Shared drives/RCW Conservation Postdoc/Umbrella species paper/Data/',
                   pattern='.xls',
                   full.names = T)
 files #what files do we have in the Data folder

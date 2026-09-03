@@ -317,6 +317,57 @@ occ_coef_trans<-read.csv('Umbrella/SimpleOcc/occu_model_parameter_transformation
 View(left_join(occ_gdf, top_occ_mod %>% rename(model_n=rowname)))
 occ_gdf %>% distinct(spp, year, model_n) %>% count(spp, year)
 
+# raw data
+hab_bins<-data.frame(min=c(2,3.01,3.51,4.01,4.51),
+                     max=c(3,3.5,4,4.5,5)) %>%
+  mutate(mid=round(((max-min)/2+min),2))
+DCERP<-bind_rows(read_excel('C:/Users/Owner/Downloads/BIRDS_RCW/Copy of 2009 DCERP data Dec 8 2011.xlsx'), #2009 data
+                 read_excel('C:/Users/Owner/Downloads/BIRDS_RCW/Copy of DCERP 2010 Dec 7 2011 verified.xlsx')) %>% #2010 data
+  select(-`Area...2`, -`...24`, -`...25`) %>% #empty columns 
+  rename(Base_Area='Area...6', #cleaning up name
+         # since each Pt name is visited on 4 dates with unique round, indicates replicate
+         Replicate='Round (1-4)',
+         #I think Label is the USFWS RCW habitat index at that spot
+         USFS_hab_index='Label') %>%
+  dplyr::select(`Pt name`, Replicate, Date1, everything()) %>%
+  #adding information needed by Distance
+  mutate(Study.Area='MCBCL',
+         Start.time= strftime(`Start time`, format="%H:%M", 
+                              tz="UTC", uzetz=T),
+         hoursmins=hm(Start.time),        # format to 'hours:minutes:seconds'
+         nMinAfterMid=hour(hoursmins)*60 + minute(hoursmins), 
+         Area=1,
+         HabCat_nf=hab_bins$mid[findInterval(USFS_hab_index, hab_bins$min,
+                                             left.open = F)],
+         HabCat=factor(HabCat_nf),
+         Year=year(Date1)) #estimating area size in km2
+names(DCERP)
+
+rare_birds <- DCERP %>% 
+  group_by(Species) %>% 
+  tally() %>%
+  mutate(percentObs=n/sum(n)*100) %>%
+  arrange(percentObs) %>%
+  filter(percentObs < 0.1)
+
+DCERP_filt <- DCERP %>%
+  filter(!(`Radial distance` %in% c('?','UK','FO', 'F','NA'))) %>%
+  mutate(distance=as.numeric(`Radial distance`),
+         Year=year(Date1)) %>%
+  filter(distance<300,
+         !(Species %in% rare_birds$Species))
+# get spfilter and point_empty from U_load_data.r
+rcw.raw <- spfilter('RCWO') %>% ungroup() %>%
+  group_by(`Pt name`, USFS_hab_index, Year, Species) %>%
+  summarise(total.yr=sum(size, na.rm=T),
+            pres=ifelse(total.yr == 0, 0, 1), .groups='drop') %>%
+  mutate(year = as.character(Year))
+bcs.raw <- spfilter('BACS') %>% ungroup() %>%
+  group_by(`Pt name`, USFS_hab_index, Year, Species) %>%
+  summarise(total.yr=sum(size, na.rm=T),
+            pres=ifelse(total.yr == 0, 0, 1), .groups='drop') %>%
+  mutate(year = as.character(Year))
+
 # Fig 3 & Fig 4  -----
 library(cowplot)
 occ_cov %>% mutate(test=USFS_s*sd(meanUSFS)+mean(meanUSFS))
@@ -325,8 +376,9 @@ sd(occ_cov$meanUSFS); mean(occ_cov$meanUSFS)
 usfs_grad <- data.frame(USFS_s=seq(-2.6, 1.6, length=50)) %>%
   mutate(USFS_r=USFS_s*0.6950697+3.907453)
 
-#Figure 3 - RCWO occupancy and presence
+#Figure 3a - RCWO occupancy and presence
 library(unmarked)
+read.csv()
 abundance_summary <- read.csv('Umbrella/results/abundance summary 95 confidence.csv')
 rcwo_top_occ_2009<-readRDS('Umbrella/SimpleOcc/topmodels/RCWO_2009.rds')
 rcwo_top_occ_2010<-readRDS('Umbrella/SimpleOcc/topmodels/RCWO_2010.rds')
@@ -339,13 +391,15 @@ rcw.psi.10 <- predict(rcwo_top_occ_2010[[1]], type="state",
 rcw.op<-bind_rows(rcw.psi.09 %>% mutate(year="2009"), 
                   rcw.psi.10 %>% mutate(year="2010")) %>%
   ggplot()+
+  geom_point(data=rcw.raw, aes(x=USFS_hab_index, y=pres, color=year), 
+             pch=1, position=position_jitter(width=0, height=0.03))+
   geom_ribbon(aes(x=USFS_r, y=Predicted, ymin=lower, ymax=upper, fill=year),
               alpha=0.5)+
   geom_line(aes(x=USFS_r, y=Predicted, linetype=year))+
   scale_x_continuous('RCW Habitat Score',
-                     breaks=c(2.5, 3.26, 3.76, 4.26, 4.76))+
-  scale_y_continuous('Proportion of Sites Occupied',
-                     limit = c(0,1))+
+                     breaks=c(2.5, 3.26, 3.76, 4.26, 4.76),
+                     limits=c(1.95,5.05))+
+  scale_y_continuous('Proportion of Sites Occupied')+
   scale_color_grey(guide=F, aesthetics=c('fill','color'))+
   scale_linetype(guide=F)+
   theme_cowplot()+
@@ -356,9 +410,12 @@ rcwo.ap<-abundance_summary %>%
   filter(species=='RCWO') %>%
   mutate(HabCat=as.numeric(HabCatfix)) %>%
   ggplot()+
+  geom_point(data=ordination_df, aes(x=as.numeric(HabCatfix), y=RCWO), 
+             position=position_jitter(width=0.17, height=0), pch=1, alpha=0.5)+
   geom_linerange(aes(x=HabCat, ymin=x2.5, ymax=x97.5))+
-  geom_point(aes(x=HabCat, y=x50), size=2)+
-  scale_y_continuous(name=expression("RCW per km"^2))+
+  geom_point(aes(x=HabCat, y=x50), size=2)+ # pulled from U_evaluate_abundance.R
+  scale_y_continuous(name=expression("RCW per km"^2), 
+                     breaks=seq(0, 125, 25), limits=c(0, 125))+
   scale_x_continuous('RCW Habitat Score',
                      breaks=c(2.5, 3.26, 3.76, 4.26, 4.76),
                      expand=c(0.05,0.05))+
@@ -370,7 +427,7 @@ ggsave('Umbrella/results/Figures/Fig3_rcwabun_20210323.tiff',
        width=5.5, height=3)
 
 
-#Figure 4
+#Figure 3b
 bacs_top_occ_2009<-readRDS('Umbrella/SimpleOcc/topmodels/BACS_2009.rds')
 bacs_top_occ_2010<-readRDS('Umbrella/SimpleOcc/topmodels/BACS_2010.rds')
 
@@ -381,13 +438,15 @@ bac.psi.10 <- predict(bacs_top_occ_2010[[1]], type="state",
 bacs.op<-bind_rows(bac.psi.09 %>% mutate(year="2009"), 
                   bac.psi.10 %>% mutate(year="2010")) %>%
   ggplot()+
+  geom_point(data=bcs.raw, aes(x=USFS_hab_index, y=pres, color=year), 
+             pch=1, position=position_jitter(width=0, height=0.03))+
   geom_ribbon(aes(x=USFS_r, y=Predicted, ymin=lower, ymax=upper,
                   fill=year), alpha = 0.5)+
   geom_line(aes(x=USFS_r, y=Predicted, linetype=year))+
   scale_x_continuous('RCW Habitat Score',
-                     breaks=c(2.5, 3.26, 3.76, 4.26, 4.76))+
-  scale_y_continuous('Proportion of Sites Occupied',
-                     limit = c(0,1))+
+                     breaks=c(2.5, 3.26, 3.76, 4.26, 4.76),
+                     limits=c(1.95,5.05))+
+  scale_y_continuous('Proportion of Sites Occupied')+
   scale_color_grey(guide=F, aesthetics=c('fill','color'))+
   scale_linetype(guide=F)+
   theme_cowplot()+
@@ -398,9 +457,12 @@ bacs.ap <- abundance_summary %>%
   filter(species=='BACS') %>%
   mutate(HabCat=as.numeric(HabCatfix)) %>%
   ggplot()+
+  geom_point(data=ordination_df, aes(x=as.numeric(HabCatfix), y=BACS), 
+             position=position_jitter(width=0.17, height=0), pch=1, alpha=0.5)+
   geom_linerange(aes(x=HabCat, ymin=x2.5, ymax=x97.5))+
   geom_point(aes(x=HabCat, y=x50), size=2)+
-  scale_y_continuous(name=expression("Bachman's Sparrow per km "^2))+
+  scale_y_continuous(name=expression("Bachman's Sparrow per km "^2), 
+                     breaks=seq(0, 450, 50))+
   scale_x_continuous('RCW Habitat Score',
                      breaks=c(2.5, 3.26, 3.76, 4.26, 4.76),
                      expand=c(0.05,0.05))+
@@ -410,6 +472,10 @@ bacs.ap <- abundance_summary %>%
 plot_grid(bacs.op, bacs.ap, labels='AUTO')
 ggsave('Umbrella/results/Figures/Fig4_bacsabun_20210323.tiff',
        width=5.5, height=3)
+
+plot_grid(rcw.op, rcwo.ap, bacs.op, bacs.ap, labels='AUTO')
+ggsave('Umbrella/results/Figures/Fig5_umb_rcwbacs_25.tiff', 
+       width=6.5, height=5.75)
 
 # Table S2 -----
 #occupancy detection model 
@@ -459,11 +525,30 @@ DCERP_filt %>%
             taxa=paste(unique(Species), collapse=', ')) %>%
   filter(!is.na(Region.Label)) %>%
   ggplot(aes(y=ntaxa))+
-  stat_summary(aes(x=as.character(Region.Label)))+
+  stat_summary(aes(x=as.character(Region.Label), group=as.character(Year), color=as.character(Year)))+
+  scale_color_grey('Year')+
   scale_x_discrete(name='RCW Habitat Score')+
   scale_y_continuous(name='Species Richness')+
-  theme_cowplot()
-ggsave('Umbrella/results/Figures/Fig2_site_richness_taxa.tiff', width=3, height=3)
+  theme_cowplot()+
+  theme(legend.position='bottom', legend.justification = 'center',
+        legend.margin = margin(t=-10))
+ggsave('Umbrella/results/Figures/Fig2_site_richness_taxa_wyear.tiff', width=3, height=3)
+
+s.rich<-DCERP_filt %>% 
+  mutate(Region.Label=hab_bins$mid[findInterval(USFS_hab_index, hab_bins$min,
+                                                left.open = F)]) %>%
+  filter(!(Species %in% c("LAGU", "TUVU"))) %>%
+  group_by(`Pt name`, Year, USFS_hab_index, Region.Label) %>%
+  summarize(ntaxa=length(unique(Species)),
+            taxa=paste(unique(Species), collapse=', ')) %>%
+  filter(!is.na(Region.Label)) %>%
+  mutate(RLf=factor(Region.Label, levels=c(2.5, 3.26, 3.76, 4.26, 4.76)), 
+         Yf=factor(Year, levels=c(2009, 2010)))
+table(s.rich$Region.Label, s.rich$Year)
+rich.mod<-aov(ntaxa~RLf+Yf, data=s.rich)
+TukeyHSD(rich.mod)$RLf %>% as_tibble() %>%
+  bind_cols(grp.comp=row.names(TukeyHSD(rich.mod)$RLf)) %>%
+  filter(`p adj` < 0.05)
 
 DCERP_filt %>% pull(Species) %>% unique() 
 
