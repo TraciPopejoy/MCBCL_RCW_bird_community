@@ -1,5 +1,7 @@
 # RCW as an umbrella species in Camp LeJeune
 
+This repository contains code for the manuscript titled "Community responses to forest management guided by red-cockaded woodpecker foraging habitat quality in a southeastern U.S. pine ecosystem" by Jeff R. Walters, Traci P. DuBose, Victoria Garcia, Kevin Rose, and Lori Blanc; manuscript is currently in review at _Ornithological Applications_.
+
 ## Scripts
 1. **U_load_data.R**
 Loads in the two excel sheets that contains point count results from 2009 and 2010. Renames some of the column names for ease of use in the future. Filters the raw point count results to exclude rare birds (<1% observations) and birds > 300 m away. Creates the function sp_filter() that pulls one species from the point count results (DCERP_filt) and formats it to run within a ds model (distance sampling model from package Distance). It also creates a dataframe of all the sampled points and unique covariates at those points. Our table of habitat guilds is also generated here. 
